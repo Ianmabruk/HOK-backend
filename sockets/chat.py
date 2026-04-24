@@ -1,4 +1,5 @@
 from flask_socketio import SocketIO, emit, join_room
+from auth_utils import token_user_id, token_user_role
 from models.models import db, Chat
 from flask_jwt_extended import decode_token
 
@@ -13,14 +14,14 @@ def register_socket_events(socketio):
         if auth and auth.get('token'):
             try:
                 decoded = decode_token(auth['token'])
-                user_id = decoded['sub']['id']
+                user_id = token_user_id(decoded)
             except Exception:
                 pass
         # Admin joins admin room
         if auth and auth.get('token'):
             try:
                 decoded = decode_token(auth['token'])
-                if decoded['sub'].get('role') == 'admin':
+                if token_user_role(decoded) == 'admin':
                     join_room('admin_room')
             except Exception:
                 pass

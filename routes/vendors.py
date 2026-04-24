@@ -1,13 +1,14 @@
 from flask import Blueprint, request, jsonify
 from models.models import db, Vendor
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
+
+from auth_utils import current_user_role
 
 vendors_bp = Blueprint('vendors', __name__)
 
 
 def require_admin():
-    identity = get_jwt_identity()
-    if not identity or identity.get('role') != 'admin':
+    if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
     return None
 

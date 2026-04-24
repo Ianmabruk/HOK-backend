@@ -1,7 +1,9 @@
-from flask import Flask
+import os
+from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO
+from werkzeug.exceptions import HTTPException
 
 from config.config import Config
 from models.models import db
@@ -37,10 +39,27 @@ def create_app():
     with app.app_context():
         db.create_all()
 
+    # ── JSON error handlers (must be inside create_app so they bind to this app) ──
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(e):
+        """Return JSON for all HTTP errors (404, 405, etc.) so the
+        frontend always receives a parseable response."""
+        return jsonify({"message": e.description}), e.code
+
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Catch-all for unhandled exceptions — return JSON 500 instead
+        of the Werkzeug HTML debugger page."""
+        app.logger.exception("Unhandled server error: %s", e)
+        return jsonify({"message": "An internal server error occurred. Please try again."}), 500
+
     return app
 
 
 app = create_app()
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    # FLASK_DEBUG=1 enables Werkzeug reloader; keep it off by default so that
+    # unhandled exceptions return JSON (not the HTML interactive debugger).
+    debug = os.getenv('FLASK_DEBUG', '0') == '1'
+    socketio.run(app, debug=debug, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)

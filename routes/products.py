@@ -1,14 +1,15 @@
 from flask import Blueprint, request, jsonify
 from models.models import db, Product
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from sqlalchemy import or_
+
+from auth_utils import current_user_role
 
 products_bp = Blueprint('products', __name__)
 
 
 def admin_required():
-    identity = get_jwt_identity()
-    if not identity or identity.get('role') != 'admin':
+    if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
     return None
 

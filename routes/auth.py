@@ -1,42 +1,263 @@
-from flask import Blueprint, request, jsonify
-from models.models import db, User
+"""
+Authentication routes for HOK Interior Designs.
+
+Endpoints
+─────────
+POST   /api/register               – create account, send welcome + verify email
+POST   /api/login                  – sign in, fire login-alert on new IP
+GET    /api/verify-email?token=    – activate account via email link
+POST   /api/resend-verification    – request a fresh verification email (JWT required)
+POST   /api/forgot-password        – request a password-reset link
+POST   /api/reset-password         – apply new password via token
+"""
+
+import logging
+import secrets
+from datetime import datetime, timedelta
+
 import bcrypt
-from flask_jwt_extended import create_access_token
+from flask import Blueprint, current_app, jsonify, request
+from flask_jwt_extended import (
+    jwt_required,
+)
 
-auth_bp = Blueprint('auth', __name__)
+from auth_utils import create_user_access_token, current_user_id
+from models.models import EmailToken, User, db
+from services.email_service import (
+    send_login_alert,
+    send_password_changed,
+    send_reset_email,
+    send_verify_email,
+    send_welcome_email,
+)
+
+auth_bp = Blueprint("auth", __name__)
+logger = logging.getLogger(__name__)
 
 
-@auth_bp.post('/register')
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _client_ip() -> str:
+    """Return real client IP, respecting X-Forwarded-For behind a proxy."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "0.0.0.0"
+
+
+def _make_token(user_id: int, token_type: str, hours: int = 24) -> str:
+    """
+    Generate a cryptographically-safe URL token, persist it, and return the
+    raw string.  Caller must call db.session.commit() afterwards.
+    Any previous unused tokens of the same type for this user are invalidated.
+    """
+    # Invalidate old tokens of this type
+    EmailToken.query.filter_by(
+        user_id=user_id, token_type=token_type, used=False
+    ).delete(synchronize_session="fetch")
+
+    raw = secrets.token_urlsafe(32)
+    et = EmailToken(
+        user_id=user_id,
+        token=raw,
+        token_type=token_type,
+        expires_at=datetime.utcnow() + timedelta(hours=hours),
+    )
+    db.session.add(et)
+    db.session.flush()   # write to DB without full commit so caller can bundle
+    return raw
+
+
+def _validate_password(pw: str):
+    """Return an error message string, or None if the password is acceptable."""
+    if len(pw) < 8:
+        return "Password must be at least 8 characters"
+    if not any(c.isdigit() for c in pw):
+        return "Password must contain at least one number"
+    return None
+
+
+# ─── POST /register ───────────────────────────────────────────────────────────
+
+@auth_bp.post("/register")
 def register():
-    data = request.get_json()
-    if not data or not all(k in data for k in ('name', 'email', 'password')):
-        return jsonify({'message': 'Missing fields'}), 400
+    data = request.get_json(silent=True) or {}
+    required = ("name", "email", "password")
+    if not all(k in data for k in required):
+        return jsonify({"message": "Missing fields"}), 400
 
-    if User.query.filter_by(email=data['email'].lower().strip()).first():
-        return jsonify({'message': 'Email already registered'}), 409
+    name = data["name"].strip()
+    email = data["email"].lower().strip()
+    password = data["password"]
 
-    # First user ever registered automatically becomes admin
-    is_first_user = User.query.count() == 0
-    hashed = bcrypt.hashpw(data['password'].encode(), bcrypt.gensalt()).decode()
-    role = 'admin' if is_first_user else 'customer'
-    user = User(name=data['name'].strip(), email=data['email'].lower().strip(),
-                password=hashed, role=role)
-    db.session.add(user)
+    pw_err = _validate_password(password)
+    if pw_err:
+        return jsonify({"message": pw_err}), 400
+
+    try:
+        if User.query.filter_by(email=email).first():
+            return jsonify({"message": "Email already registered"}), 409
+
+        is_first = User.query.count() == 0
+        role = "admin" if is_first else "customer"
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+        user = User(name=name, email=email, password=hashed, role=role, email_verified=False)
+        db.session.add(user)
+        db.session.flush()  # populate user.id
+
+        verify_token = _make_token(user.id, "verify_email", hours=24)
+        db.session.commit()
+
+        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+        verify_url = f"{frontend_url}/verify-email?token={verify_token}"
+        send_welcome_email(user.email, user.name, verify_url)
+
+        jwt_token = create_user_access_token(user)
+        return jsonify({
+            "user": user.to_dict(),
+            "token": jwt_token,
+            "message": "Account created! Check your email to verify your address.",
+        }), 201
+
+    except Exception:
+        db.session.rollback()
+        logger.exception("Register failed for email=%s", email)
+        return jsonify({"message": "Registration failed due to a server error. Please try again."}), 500
+
+
+# ─── POST /login ──────────────────────────────────────────────────────────────
+
+@auth_bp.post("/login")
+def login():
+    data = request.get_json(silent=True) or {}
+    if not all(k in data for k in ("email", "password")):
+        return jsonify({"message": "Missing fields"}), 400
+
+    try:
+        user = User.query.filter_by(email=data["email"].lower().strip()).first()
+        if not user or not bcrypt.checkpw(data["password"].encode(), user.password.encode()):
+            return jsonify({"message": "Invalid email or password"}), 401
+
+        client_ip = _client_ip()
+        prev_ip = user.last_login_ip
+
+        # Persist updated IP
+        user.last_login_ip = client_ip
+        db.session.commit()
+
+        # Fire login-alert email asynchronously if IP changed (suspicious activity)
+        if prev_ip and prev_ip != client_ip:
+            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+            change_url = f"{frontend_url}/forgot-password"
+            time_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            send_login_alert(user.email, user.name, client_ip, time_str, change_url)
+            logger.info("[auth] Login-alert sent to %s (IP changed: %s → %s)", user.email, prev_ip, client_ip)
+
+        jwt_token = create_user_access_token(user)
+        return jsonify({"user": user.to_dict(), "token": jwt_token}), 200
+
+    except Exception:
+        db.session.rollback()
+        logger.exception("Login failed for email=%s", data.get('email', ''))
+        return jsonify({"message": "Login failed due to a server error. Please try again."}), 500
+
+
+# ─── GET /verify-email?token= ─────────────────────────────────────────────────
+
+@auth_bp.get("/verify-email")
+def verify_email():
+    token_str = request.args.get("token", "").strip()
+    if not token_str:
+        return jsonify({"message": "Token is required"}), 400
+
+    record = EmailToken.query.filter_by(
+        token=token_str, token_type="verify_email", used=False
+    ).first()
+
+    if not record:
+        return jsonify({"message": "Invalid or already-used verification link"}), 400
+
+    if record.expires_at < datetime.utcnow():
+        return jsonify({"message": "Verification link has expired. Please request a new one."}), 400
+
+    record.user.email_verified = True
+    record.used = True
     db.session.commit()
 
-    token = create_access_token(identity={'id': user.id, 'role': user.role})
-    return jsonify({'user': user.to_dict(), 'token': token}), 201
+    return jsonify({"message": "Email verified! You can now enjoy all features.", "user": record.user.to_dict()}), 200
 
 
-@auth_bp.post('/login')
-def login():
-    data = request.get_json()
-    if not data or not all(k in data for k in ('email', 'password')):
-        return jsonify({'message': 'Missing fields'}), 400
+# ─── POST /resend-verification ────────────────────────────────────────────────
 
-    user = User.query.filter_by(email=data['email'].lower().strip()).first()
-    if not user or not bcrypt.checkpw(data['password'].encode(), user.password.encode()):
-        return jsonify({'message': 'Invalid credentials'}), 401
+@auth_bp.post("/resend-verification")
+@jwt_required()
+def resend_verification():
+    user = db.session.get(User, current_user_id())
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+    if user.email_verified:
+        return jsonify({"message": "Email is already verified"}), 400
 
-    token = create_access_token(identity={'id': user.id, 'role': user.role})
-    return jsonify({'user': user.to_dict(), 'token': token}), 200
+    verify_token = _make_token(user.id, "verify_email", hours=24)
+    db.session.commit()
+
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+    send_verify_email(user.email, user.name, f"{frontend_url}/verify-email?token={verify_token}")
+    return jsonify({"message": "Verification email sent!"}), 200
+
+
+# ─── POST /forgot-password ────────────────────────────────────────────────────
+
+@auth_bp.post("/forgot-password")
+def forgot_password():
+    data = request.get_json(silent=True) or {}
+    email = data.get("email", "").lower().strip()
+    if not email:
+        return jsonify({"message": "Email is required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    # Always return a generic message to prevent email-enumeration attacks
+    if user:
+        reset_token = _make_token(user.id, "password_reset", hours=1)
+        db.session.commit()
+
+        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+        reset_url = f"{frontend_url}/reset-password?token={reset_token}"
+        send_reset_email(user.email, user.name, reset_url)
+
+    return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
+
+
+# ─── POST /reset-password ─────────────────────────────────────────────────────
+
+@auth_bp.post("/reset-password")
+def reset_password():
+    data = request.get_json(silent=True) or {}
+    token_str = data.get("token", "").strip()
+    new_password = data.get("password", "")
+
+    if not token_str or not new_password:
+        return jsonify({"message": "Token and new password are required"}), 400
+
+    pw_err = _validate_password(new_password)
+    if pw_err:
+        return jsonify({"message": pw_err}), 400
+
+    record = EmailToken.query.filter_by(
+        token=token_str, token_type="password_reset", used=False
+    ).first()
+
+    if not record:
+        return jsonify({"message": "Invalid or already-used reset link"}), 400
+
+    if record.expires_at < datetime.utcnow():
+        return jsonify({"message": "Reset link has expired. Please request a new one."}), 400
+
+    user = record.user
+    user.password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    record.used = True
+    db.session.commit()
+
+    send_password_changed(user.email, user.name)
+    return jsonify({"message": "Password reset successfully! You can now sign in."}), 200

@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify
 from models.models import db, Order, OrderItem, Product
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
+
+from auth_utils import current_user_id, current_user_role
 
 orders_bp = Blueprint('orders', __name__)
 
@@ -8,14 +10,13 @@ orders_bp = Blueprint('orders', __name__)
 @orders_bp.post('/orders')
 @jwt_required()
 def create_order():
-    identity = get_jwt_identity()
     data = request.get_json()
     items_data = data.get('items', [])
     if not items_data:
         return jsonify({'message': 'No items'}), 400
 
     order = Order(
-        user_id=identity['id'],
+        user_id=current_user_id(),
         total_price=data.get('total_price', 0),
         shipping_info=data.get('shipping_info', {})
     )
@@ -39,19 +40,17 @@ def create_order():
 @orders_bp.get('/orders')
 @jwt_required()
 def get_orders():
-    identity = get_jwt_identity()
-    if identity.get('role') == 'admin':
+    if current_user_role() == 'admin':
         orders = Order.query.order_by(Order.created_at.desc()).all()
     else:
-        orders = Order.query.filter_by(user_id=identity['id']).order_by(Order.created_at.desc()).all()
+        orders = Order.query.filter_by(user_id=current_user_id()).order_by(Order.created_at.desc()).all()
     return jsonify([o.to_dict() for o in orders])
 
 
 @orders_bp.put('/orders/<int:oid>/status')
 @jwt_required()
 def update_status(oid):
-    identity = get_jwt_identity()
-    if identity.get('role') != 'admin':
+    if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
     order = Order.query.get_or_404(oid)
     data = request.get_json()

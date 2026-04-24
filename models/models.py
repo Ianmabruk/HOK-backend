@@ -11,11 +11,34 @@ class User(db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='customer')
+    email_verified = db.Column(db.Boolean, default=False, nullable=False)
+    last_login_ip = db.Column(db.String(45))          # max 45 chars covers IPv6
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
-        return {'id': self.id, 'name': self.name, 'email': self.email,
-                'role': self.role, 'created_at': self.created_at.isoformat()}
+        return {
+            'id': self.id,
+            'name': self.name,
+            'email': self.email,
+            'role': self.role,
+            'email_verified': self.email_verified,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
+class EmailToken(db.Model):
+    """Stores single-use tokens for email verification and password reset."""
+    __tablename__ = 'email_tokens'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    token = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    # 'verify_email' | 'password_reset'
+    token_type = db.Column(db.String(30), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('email_tokens', lazy=True, passive_deletes=True))
 
 
 class Vendor(db.Model):
