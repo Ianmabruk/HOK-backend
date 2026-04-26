@@ -7,6 +7,7 @@ flask-mail
 bcrypt
 python-dotenv
 gunicorn
+psycopg2-binary
 sendgrid
 python-jose[cryptography]
 passlib[bcrypt]

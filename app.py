@@ -1,5 +1,4 @@
 import os
-import bcrypt
 from pathlib import Path
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
@@ -8,7 +7,7 @@ from flask_socketio import SocketIO
 from werkzeug.exceptions import HTTPException
 
 from config.config import Config
-from models.models import db, User
+from models.models import db
 from routes.auth import auth_bp
 from routes.products import products_bp
 from routes.orders import orders_bp
@@ -17,25 +16,6 @@ from routes.vendors import vendors_bp
 from sockets.chat import register_socket_events
 
 socketio = SocketIO()
-
-
-def _seed_admin():
-    """Create the admin account on first startup if one doesn't exist yet."""
-    if User.query.filter_by(role='admin').first():
-        return
-    admin_email = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com')
-    admin_password = os.getenv('ADMIN_PASSWORD', 'Admin@1234')
-    admin_name = os.getenv('ADMIN_NAME', 'Admin')
-    hashed = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
-    admin = User(
-        name=admin_name,
-        email=admin_email,
-        password=hashed,
-        role='admin',
-        email_verified=True,
-    )
-    db.session.add(admin)
-    db.session.commit()
 
 
 def create_app():
@@ -59,7 +39,6 @@ def create_app():
 
     with app.app_context():
         db.create_all()
-        _seed_admin()
 
     uploads_root = Path(app.config['UPLOAD_FOLDER'])
     uploads_root.mkdir(parents=True, exist_ok=True)

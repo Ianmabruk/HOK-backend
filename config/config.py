@@ -12,8 +12,30 @@ if _root_env.exists():
     load_dotenv(dotenv_path=_root_env, override=False)
 
 
+def _default_sqlite_path() -> str:
+    db_path = Path(__file__).resolve().parent.parent / 'instance' / 'interior.db'
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return f'sqlite:///{db_path}'
+
+
+def _database_uri() -> str:
+    database_url = os.getenv('DATABASE_URL', '').strip()
+    if database_url:
+        if database_url.startswith('postgres://'):
+            return database_url.replace('postgres://', 'postgresql://', 1)
+        return database_url
+
+    if os.getenv('RENDER'):
+        raise RuntimeError(
+            'DATABASE_URL is required in production. Render disks are ephemeral for the current SQLite fallback, '
+            'so admin accounts, orders, chats, and products will be lost after restarts.'
+        )
+
+    return _default_sqlite_path()
+
+
 class Config:
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///interior.db')
+    SQLALCHEMY_DATABASE_URI = _database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-change-me')
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')

@@ -14,13 +14,19 @@ ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@1234')
 
 with app.app_context():
-    existing = User.query.filter_by(email=ADMIN_EMAIL).first()
-    if existing:
-        print(f'Admin already exists: {ADMIN_EMAIL}')
-    else:
-        hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
-        admin = User(name=ADMIN_NAME, email=ADMIN_EMAIL, password=hashed, role='admin')
-        db.session.add(admin)
-        db.session.commit()
-        print(f'Admin created: {ADMIN_EMAIL} / {ADMIN_PASSWORD}')
-        print('IMPORTANT: Change the password after first login!')
+  existing_admin = User.query.filter_by(role='admin').first()
+  if existing_admin:
+    print(f'Admin already exists: {existing_admin.email}')
+  else:
+    hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
+    admin = User(
+      name=ADMIN_NAME,
+      email=ADMIN_EMAIL,
+      password=hashed,
+      role='admin',
+      email_verified=True,
+    )
+    db.session.add(admin)
+    db.session.commit()
+    print(f'Admin created: {ADMIN_EMAIL} / {ADMIN_PASSWORD}')
+    print('IMPORTANT: Change the password after first login!')
