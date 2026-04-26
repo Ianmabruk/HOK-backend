@@ -102,7 +102,8 @@ def register():
         role = "admin" if is_first else "customer"
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-        user = User(name=name, email=email, password=hashed, role=role, email_verified=False)
+        # First user (site owner/admin) is auto-verified; others must verify by email
+        user = User(name=name, email=email, password=hashed, role=role, email_verified=is_first)
         db.session.add(user)
         db.session.flush()  # populate user.id
 

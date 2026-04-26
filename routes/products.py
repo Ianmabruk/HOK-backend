@@ -4,6 +4,7 @@ from flask_jwt_extended import jwt_required
 from sqlalchemy import or_
 
 from auth_utils import current_user_role
+from services.media_storage import save_media_file
 
 products_bp = Blueprint('products', __name__)
 
@@ -86,6 +87,31 @@ def update_product(pid):
             setattr(p, field, data[field] if data[field] != '' else None)
     db.session.commit()
     return jsonify(p.to_dict())
+
+
+@products_bp.post('/products/media-upload')
+@jwt_required()
+def upload_product_media():
+    err = admin_required()
+    if err:
+        return err
+
+    media_kind = request.form.get('type', 'image').strip().lower()
+    if media_kind not in {'image', 'video'}:
+        return jsonify({'message': 'Invalid media type'}), 400
+
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'message': 'No file uploaded'}), 400
+
+    try:
+        uploaded = save_media_file(file, media_kind)
+    except ValueError as exc:
+        return jsonify({'message': str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({'message': str(exc)}), 500
+
+    return jsonify(uploaded), 201
 
 
 @products_bp.delete('/products/<int:pid>')

@@ -17,6 +17,13 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-change-me')
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+    BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', 'http://localhost:5000')
+    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', str(Path(__file__).resolve().parent.parent / 'uploads'))
+
+    # Optional Cloudinary media storage
+    CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME')
+    CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY')
+    CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET')
 
     # SendGrid / Email
     SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
