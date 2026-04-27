@@ -164,6 +164,15 @@ def login():
         return jsonify({"message": "Login failed due to a server error. Please try again."}), 500
 
 
+@auth_bp.get("/setup-status")
+def setup_status():
+    has_admin = User.query.filter_by(role="admin").first() is not None
+    return jsonify({
+        "has_admin": has_admin,
+        "requires_admin_setup": not has_admin,
+    }), 200
+
+
 # ─── GET /verify-email?token= ─────────────────────────────────────────────────
 
 @auth_bp.get("/verify-email")
