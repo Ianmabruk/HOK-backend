@@ -77,6 +77,18 @@ def _validate_password(pw: str):
     return None
 
 
+def _configured_admin_email() -> str:
+    return (current_app.config.get("ADMIN_EMAIL") or "admin@hokinterior.com").strip().lower()
+
+
+def _configured_admin_name() -> str:
+    return (current_app.config.get("ADMIN_NAME") or "Admin").strip() or "Admin"
+
+
+def _admin_exists() -> bool:
+    return User.query.filter_by(role="admin").first() is not None
+
+
 # ─── POST /register ───────────────────────────────────────────────────────────
 
 @auth_bp.post("/register")
@@ -98,27 +110,41 @@ def register():
         if User.query.filter_by(email=email).first():
             return jsonify({"message": "Email already registered"}), 409
 
-        is_first = User.query.count() == 0
-        role = "admin" if is_first else "customer"
+        configured_admin_email = _configured_admin_email()
+        wants_admin_account = email == configured_admin_email
+        has_admin = _admin_exists()
+
+        if wants_admin_account and has_admin:
+            return jsonify({"message": "Admin account already exists. Sign in to continue."}), 409
+
+        role = "admin" if wants_admin_account and not has_admin else "customer"
+        email_verified = role == "admin"
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-        # First user (site owner/admin) is auto-verified; others must verify by email
-        user = User(name=name, email=email, password=hashed, role=role, email_verified=is_first)
+        user = User(name=name, email=email, password=hashed, role=role, email_verified=email_verified)
         db.session.add(user)
         db.session.flush()  # populate user.id
 
-        verify_token = _make_token(user.id, "verify_email", hours=24)
+        verify_url = None
+        if not email_verified:
+            verify_token = _make_token(user.id, "verify_email", hours=24)
+            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+            verify_url = f"{frontend_url}/verify-email?token={verify_token}"
+
         db.session.commit()
 
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
-        verify_url = f"{frontend_url}/verify-email?token={verify_token}"
-        send_welcome_email(user.email, user.name, verify_url)
+        if verify_url:
+            send_welcome_email(user.email, user.name, verify_url)
 
         jwt_token = create_user_access_token(user)
         return jsonify({
             "user": user.to_dict(),
             "token": jwt_token,
-            "message": "Account created! Check your email to verify your address.",
+            "message": (
+                f"Admin account created for {configured_admin_email}. You can now access the dashboard."
+                if role == "admin"
+                else "Account created! Check your email to verify your address."
+            ),
         }), 201
 
     except Exception:
@@ -166,10 +192,12 @@ def login():
 
 @auth_bp.get("/setup-status")
 def setup_status():
-    has_admin = User.query.filter_by(role="admin").first() is not None
+    has_admin = _admin_exists()
     return jsonify({
         "has_admin": has_admin,
         "requires_admin_setup": not has_admin,
+        "admin_email": _configured_admin_email(),
+        "admin_name": _configured_admin_name(),
     }), 200
 
 

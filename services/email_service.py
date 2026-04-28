@@ -11,10 +11,12 @@ Usage:
 
 import logging
 import os
+import re
 import threading
+from html import escape
 
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+from sendgrid.helpers.mail import Email, Mail
 
 logger = logging.getLogger(__name__)
 
@@ -184,27 +186,55 @@ def _password_changed_body(name: str) -> str:
 
 # ─── Core delivery engine ─────────────────────────────────────────────────────
 
+def _plain_text_content(html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _response_body_text(body) -> str:
+    if body is None:
+        return ""
+    if isinstance(body, bytes):
+        return body.decode("utf-8", errors="replace")
+    return str(body)
+
 def _deliver(to_email: str, subject: str, html: str) -> None:
     """Synchronous delivery — called from a background thread."""
-    api_key = os.environ.get("SENDGRID_API_KEY")
+    api_key = (os.environ.get("SENDGRID_API_KEY") or "").strip()
     if not api_key:
         logger.error("[email] SENDGRID_API_KEY not set — email to %s skipped", to_email)
         return
 
-    from_addr = os.environ.get("FROM_EMAIL", "noreply@hokinteriors.com")
-    from_name = os.environ.get("EMAIL_FROM_NAME", "HOK Interior Designs")
+    from_addr = (os.environ.get("FROM_EMAIL") or os.environ.get("SENDGRID_FROM_EMAIL") or "").strip()
+    if not from_addr:
+        logger.error("[email] FROM_EMAIL not set — email to %s skipped", to_email)
+        return
+
+    from_name = (os.environ.get("EMAIL_FROM_NAME") or "HOK Interior Designs").strip() or "HOK Interior Designs"
 
     message = Mail(
-        from_email=(from_addr, from_name),
+        from_email=Email(from_addr, from_name),
         to_emails=to_email,
         subject=subject,
         html_content=html,
+        plain_text_content=_plain_text_content(html),
     )
 
     try:
         sg = SendGridAPIClient(api_key)
         resp = sg.send(message)
-        logger.info("[email] Sent '%s' → %s  (status %s)", subject, to_email, resp.status_code)
+        status_code = int(getattr(resp, "status_code", 0) or 0)
+        if 200 <= status_code < 300:
+            logger.info("[email] Sent '%s' → %s  (status %s)", subject, to_email, status_code)
+            return
+
+        logger.error(
+            "[email] SendGrid rejected '%s' → %s (status %s, body=%s)",
+            subject,
+            to_email,
+            status_code,
+            _response_body_text(getattr(resp, "body", ""))[:500],
+        )
     except Exception as exc:
         logger.error("[email] Failed to send '%s' → %s: %s", subject, to_email, exc)
 
@@ -245,3 +275,21 @@ def send_password_changed(to_email: str, name: str) -> None:
     """Confirmation email after a successful password reset."""
     subject = "Password updated — HOK Interior Designs"
     send_email(to_email, subject, _wrap(_password_changed_body(name), subject))
+
+
+def _admin_message_body(name: str, message: str) -> str:
+    safe_name = escape(name or 'there')
+    paragraphs = [segment.strip() for segment in re.split(r'\n\s*\n', message.strip()) if segment.strip()]
+    rendered_message = ''.join(_p(escape(segment).replace('\n', '<br/>')) for segment in paragraphs)
+    return (
+        _h2('A message from HOK Interior Designs')
+        + _p(f'Hi {safe_name},')
+        + rendered_message
+        + _divider()
+        + _p('If you have questions, reply to this email and our team will get back to you.', muted=True)
+    )
+
+
+def send_admin_message(to_email: str, name: str, subject: str, message: str) -> None:
+    """Admin-composed message sent to a customer."""
+    send_email(to_email, subject, _wrap(_admin_message_body(name, message), subject))

@@ -39,8 +39,12 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-change-me')
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
-    BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', 'http://localhost:5000')
+    BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', '').strip()
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', str(Path(__file__).resolve().parent.parent / 'uploads'))
+
+    ADMIN_NAME = os.getenv('ADMIN_NAME', 'Admin').strip() or 'Admin'
+    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com').strip().lower()
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@1234')
 
     # Optional Cloudinary media storage
     CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME')
@@ -49,7 +53,7 @@ class Config:
 
     # SendGrid / Email
     SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
-    FROM_EMAIL = os.getenv('FROM_EMAIL', 'noreply@hokinteriors.com')
+    FROM_EMAIL = os.getenv('FROM_EMAIL', '').strip()
     EMAIL_FROM_NAME = os.getenv('EMAIL_FROM_NAME', 'HOK Interior Designs')
 
     # Connection pool (applies to PostgreSQL; SQLite ignores pool settings gracefully)

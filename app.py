@@ -4,6 +4,7 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO
+from sqlalchemy import inspect, text
 from werkzeug.exceptions import HTTPException
 
 from config.config import Config
@@ -18,16 +19,46 @@ from sockets.chat import register_socket_events
 socketio = SocketIO()
 
 
+def _allowed_origins(app):
+    frontend_url = app.config.get('FRONTEND_URL', '').rstrip('/')
+    origins = {frontend_url, 'http://localhost:5173', 'http://127.0.0.1:5173'}
+    return [origin for origin in origins if origin]
+
+
+def _ensure_order_item_columns(app):
+    inspector = inspect(db.engine)
+    existing_columns = {column['name'] for column in inspector.get_columns('order_items')}
+    alterations = []
+
+    if 'unit_price' not in existing_columns:
+        alterations.append('ALTER TABLE order_items ADD COLUMN unit_price NUMERIC(10, 2)')
+    if 'product_title' not in existing_columns:
+        alterations.append('ALTER TABLE order_items ADD COLUMN product_title VARCHAR(255)')
+    if 'product_image' not in existing_columns:
+        alterations.append('ALTER TABLE order_items ADD COLUMN product_image TEXT')
+    if 'customizations' not in existing_columns:
+        alterations.append('ALTER TABLE order_items ADD COLUMN customizations JSON')
+
+    if not alterations:
+        return
+
+    with db.engine.begin() as connection:
+        for statement in alterations:
+            connection.execute(text(statement))
+    app.logger.info('Applied lightweight order_items schema updates: %s', ', '.join(alterations))
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    CORS(app, resources={r'/api/*': {'origins': '*'}},
-         supports_credentials=True)
+    allowed_origins = _allowed_origins(app)
+
+    CORS(app, resources={r'/api/*': {'origins': allowed_origins}}, supports_credentials=True)
 
     db.init_app(app)
     JWTManager(app)
-    socketio.init_app(app, cors_allowed_origins='*', async_mode='threading')
+    socketio.init_app(app, cors_allowed_origins=allowed_origins, async_mode='threading')
 
     app.register_blueprint(auth_bp, url_prefix='/api')
     app.register_blueprint(products_bp, url_prefix='/api')
@@ -39,6 +70,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _ensure_order_item_columns(app)
 
     uploads_root = Path(app.config['UPLOAD_FOLDER'])
     uploads_root.mkdir(parents=True, exist_ok=True)

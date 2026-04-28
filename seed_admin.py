@@ -5,15 +5,15 @@ Run this once to create an admin account:
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
+import bcrypt
 from app import app
 from models.models import db, User
-import bcrypt
-
-ADMIN_NAME = os.getenv('ADMIN_NAME', 'Admin')
-ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com').strip().lower()
-ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@1234')
 
 with app.app_context():
+  ADMIN_NAME = app.config.get('ADMIN_NAME', 'Admin')
+  ADMIN_EMAIL = app.config.get('ADMIN_EMAIL', 'admin@hokinterior.com').strip().lower()
+  ADMIN_PASSWORD = app.config.get('ADMIN_PASSWORD', 'Admin@1234')
+
   existing_admin = User.query.filter(
     (User.role == 'admin') | (User.email == ADMIN_EMAIL)
   ).order_by(User.id.asc()).first()

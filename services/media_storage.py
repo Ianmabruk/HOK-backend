@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import uuid4
 
-from flask import current_app
+from flask import current_app, has_request_context, request
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 VIDEO_EXTENSIONS = {'.mp4', '.webm', '.mov', '.m4v'}
+logger = logging.getLogger(__name__)
 
 
 def _uploads_root() -> Path:
@@ -39,8 +42,23 @@ def _configure_cloudinary() -> None:
     )
 
 
+def _is_loopback_url(url: str) -> bool:
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    return hostname in {None, 'localhost', '127.0.0.1', '0.0.0.0'}
+
+
+def _public_base_url() -> str:
+    configured = (current_app.config.get('BACKEND_PUBLIC_URL') or '').strip().rstrip('/')
+    if configured and not _is_loopback_url(configured):
+        return configured
+    if has_request_context() and request.host_url:
+        return request.host_url.rstrip('/')
+    return configured
+
+
 def _local_media_url(relative_path: str) -> str:
-    base = current_app.config.get('BACKEND_PUBLIC_URL', '').rstrip('/')
+    base = _public_base_url()
     media_path = f"/uploads/{relative_path}"
     return f"{base}{media_path}" if base else media_path
 
@@ -70,19 +88,23 @@ def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
         except ImportError as exc:
             raise RuntimeError('Cloudinary support is not installed') from exc
 
-        _configure_cloudinary()
-        resource_type = 'image' if kind == 'image' else 'video'
-        uploaded = cloudinary.uploader.upload(
-            file,
-            folder=f"hok/{kind}s",
-            resource_type=resource_type,
-            public_id=f"{kind}-{uuid4().hex}",
-            overwrite=True,
-        )
-        return {
-            'url': uploaded['secure_url'],
-            'provider': 'cloudinary',
-        }
+        try:
+            _configure_cloudinary()
+            resource_type = 'image' if kind == 'image' else 'video'
+            uploaded = cloudinary.uploader.upload(
+                file,
+                folder=f"hok/{kind}s",
+                resource_type=resource_type,
+                public_id=f"{kind}-{uuid4().hex}",
+                overwrite=True,
+            )
+            return {
+                'url': uploaded['secure_url'],
+                'provider': 'cloudinary',
+            }
+        except Exception as exc:
+            logger.warning('Cloudinary upload failed for %s; falling back to local storage: %s', kind, exc)
+            file.stream.seek(0)
 
     relative_dir = Path(kind + 's')
     filename = f"{kind}-{uuid4().hex}{extension}"
