@@ -13,8 +13,10 @@ import logging
 import os
 import re
 import threading
+from datetime import datetime
 from html import escape
 
+from flask import current_app, has_app_context
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Email, Mail
 
@@ -198,16 +200,49 @@ def _response_body_text(body) -> str:
         return body.decode("utf-8", errors="replace")
     return str(body)
 
-def _deliver(to_email: str, subject: str, html: str) -> None:
+
+def _update_delivery_log(app, delivery_log_id, **fields) -> None:
+    if not app or not delivery_log_id:
+        return
+
+    from models.models import EmailDeliveryLog, db
+
+    with app.app_context():
+        delivery_log = db.session.get(EmailDeliveryLog, delivery_log_id)
+        if not delivery_log:
+            return
+        for key, value in fields.items():
+            setattr(delivery_log, key, value)
+        db.session.commit()
+
+
+def sendgrid_health_payload() -> dict:
+    api_key_configured = bool((os.environ.get('SENDGRID_API_KEY') or '').strip())
+    from_email = (os.environ.get('FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL') or '').strip()
+    return {
+        'service': 'sendgrid',
+        'ready': api_key_configured and bool(from_email),
+        'checks': {
+            'sendgrid_api_key_configured': api_key_configured,
+            'from_email_configured': bool(from_email),
+            'email_from_name_configured': bool((os.environ.get('EMAIL_FROM_NAME') or '').strip()),
+        },
+        'provider': 'sendgrid',
+    }
+
+
+def _deliver(app, to_email: str, subject: str, html: str, delivery_log_id: int | None = None) -> None:
     """Synchronous delivery — called from a background thread."""
     api_key = (os.environ.get("SENDGRID_API_KEY") or "").strip()
     if not api_key:
         logger.error("[email] SENDGRID_API_KEY not set — email to %s skipped", to_email)
+        _update_delivery_log(app, delivery_log_id, status='failed', provider='sendgrid', error_message='SENDGRID_API_KEY not set')
         return
 
     from_addr = (os.environ.get("FROM_EMAIL") or os.environ.get("SENDGRID_FROM_EMAIL") or "").strip()
     if not from_addr:
         logger.error("[email] FROM_EMAIL not set — email to %s skipped", to_email)
+        _update_delivery_log(app, delivery_log_id, status='failed', provider='sendgrid', error_message='FROM_EMAIL not set')
         return
 
     from_name = (os.environ.get("EMAIL_FROM_NAME") or "HOK Interior Designs").strip() or "HOK Interior Designs"
@@ -226,22 +261,27 @@ def _deliver(to_email: str, subject: str, html: str) -> None:
         status_code = int(getattr(resp, "status_code", 0) or 0)
         if 200 <= status_code < 300:
             logger.info("[email] Sent '%s' → %s  (status %s)", subject, to_email, status_code)
+            _update_delivery_log(app, delivery_log_id, status='sent', provider='sendgrid', error_message=None, sent_at=datetime.utcnow())
             return
 
+        error_body = _response_body_text(getattr(resp, "body", ""))[:500]
         logger.error(
             "[email] SendGrid rejected '%s' → %s (status %s, body=%s)",
             subject,
             to_email,
             status_code,
-            _response_body_text(getattr(resp, "body", ""))[:500],
+            error_body,
         )
+        _update_delivery_log(app, delivery_log_id, status='failed', provider='sendgrid', error_message=f'Status {status_code}: {error_body}')
     except Exception as exc:
         logger.error("[email] Failed to send '%s' → %s: %s", subject, to_email, exc)
+        _update_delivery_log(app, delivery_log_id, status='failed', provider='sendgrid', error_message=str(exc))
 
 
-def send_email(to_email: str, subject: str, html: str) -> None:
+def send_email(to_email: str, subject: str, html: str, delivery_log_id: int | None = None) -> None:
     """Non-blocking: spawn a daemon thread for delivery so HTTP responses never wait."""
-    t = threading.Thread(target=_deliver, args=(to_email, subject, html), daemon=True)
+    app = current_app._get_current_object() if has_app_context() else None
+    t = threading.Thread(target=_deliver, args=(app, to_email, subject, html, delivery_log_id), daemon=True)
     t.start()
 
 
@@ -290,6 +330,6 @@ def _admin_message_body(name: str, message: str) -> str:
     )
 
 
-def send_admin_message(to_email: str, name: str, subject: str, message: str) -> None:
+def send_admin_message(to_email: str, name: str, subject: str, message: str, delivery_log_id: int | None = None) -> None:
     """Admin-composed message sent to a customer."""
-    send_email(to_email, subject, _wrap(_admin_message_body(name, message), subject))
+    send_email(to_email, subject, _wrap(_admin_message_body(name, message), subject), delivery_log_id=delivery_log_id)

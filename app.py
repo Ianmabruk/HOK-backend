@@ -14,6 +14,7 @@ from routes.products import products_bp
 from routes.orders import orders_bp
 from routes.users import users_bp
 from routes.vendors import vendors_bp
+from services.email_service import sendgrid_health_payload
 from sockets.chat import register_socket_events
 
 socketio = SocketIO()
@@ -78,6 +79,11 @@ def create_app():
     @app.get('/uploads/<path:filename>')
     def uploaded_file(filename):
         return send_from_directory(uploads_root, filename)
+
+    @app.get('/api/health/email')
+    def email_health():
+        payload = sendgrid_health_payload()
+        return jsonify(payload), 200
 
     # ── JSON error handlers (must be inside create_app so they bind to this app) ──
     @app.errorhandler(HTTPException)

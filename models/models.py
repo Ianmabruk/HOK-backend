@@ -41,6 +41,49 @@ class EmailToken(db.Model):
     user = db.relationship('User', backref=db.backref('email_tokens', lazy=True, passive_deletes=True))
 
 
+class EmailDeliveryLog(db.Model):
+    __tablename__ = 'email_delivery_logs'
+    __table_args__ = (
+        db.Index('ix_email_delivery_logs_created_at', 'created_at'),
+        db.Index('ix_email_delivery_logs_status', 'status'),
+        db.Index('ix_email_delivery_logs_recipient_email', 'recipient_email'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    recipient_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    triggered_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    recipient_name = db.Column(db.String(120), nullable=True)
+    recipient_email = db.Column(db.String(255), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    message_preview = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(30), default='queued', nullable=False)
+    provider = db.Column(db.String(40), nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=True)
+
+    recipient_user = db.relationship('User', foreign_keys=[recipient_user_id])
+    triggered_by_user = db.relationship('User', foreign_keys=[triggered_by_user_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'recipient_user_id': self.recipient_user_id,
+            'triggered_by_user_id': self.triggered_by_user_id,
+            'recipient_name': self.recipient_name,
+            'recipient_email': self.recipient_email,
+            'subject': self.subject,
+            'message_preview': self.message_preview,
+            'status': self.status,
+            'provider': self.provider,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+        }
+
+
 class Vendor(db.Model):
     __tablename__ = 'vendors'
     id = db.Column(db.Integer, primary_key=True)

@@ -1,8 +1,8 @@
 from flask import Blueprint, jsonify, request
-from models.models import User
+from models.models import EmailDeliveryLog, User, db
 from flask_jwt_extended import jwt_required
 
-from auth_utils import current_user_role
+from auth_utils import current_user_id, current_user_role
 from services.email_service import send_admin_message
 
 users_bp = Blueprint('users', __name__)
@@ -64,15 +64,47 @@ def email_users():
     if not recipients:
         return jsonify({'message': 'No matching users with email addresses were found'}), 404
 
+    delivery_logs = []
+    sender_id = current_user_id()
     for user in recipients:
-        send_admin_message(user.email, user.name, subject, message)
+        delivery_log = EmailDeliveryLog(
+            recipient_user_id=user.id,
+            triggered_by_user_id=sender_id,
+            recipient_name=user.name,
+            recipient_email=user.email,
+            subject=subject,
+            message_preview=message[:280],
+            status='queued',
+            provider='sendgrid',
+        )
+        db.session.add(delivery_log)
+        delivery_logs.append((user, delivery_log))
+
+    db.session.commit()
+
+    for user, delivery_log in delivery_logs:
+        send_admin_message(user.email, user.name, subject, message, delivery_log_id=delivery_log.id)
 
     return jsonify({
         'message': f'Email queued for {len(recipients)} user(s).',
         'queued_count': len(recipients),
         'recipient_mode': recipient_mode,
+        'delivery_logs': [delivery_log.to_dict() for _, delivery_log in delivery_logs],
         'recipients': [
             {'id': user.id, 'name': user.name, 'email': user.email}
             for user in recipients
         ],
     }), 200
+
+
+@users_bp.get('/users/email/logs')
+@jwt_required()
+def get_email_logs():
+    err = _admin_only()
+    if err:
+        return err
+
+    limit = request.args.get('limit', default=50, type=int) or 50
+    limit = max(1, min(limit, 200))
+    logs = EmailDeliveryLog.query.order_by(EmailDeliveryLog.created_at.desc()).limit(limit).all()
+    return jsonify([log.to_dict() for log in logs])
