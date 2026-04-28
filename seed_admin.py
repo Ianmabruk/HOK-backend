@@ -10,15 +10,24 @@ from models.models import db, User
 import bcrypt
 
 ADMIN_NAME = os.getenv('ADMIN_NAME', 'Admin')
-ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com')
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com').strip().lower()
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@1234')
 
 with app.app_context():
-  existing_admin = User.query.filter_by(role='admin').first()
+  existing_admin = User.query.filter(
+    (User.role == 'admin') | (User.email == ADMIN_EMAIL)
+  ).order_by(User.id.asc()).first()
+  hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
+
   if existing_admin:
-    print(f'Admin already exists: {existing_admin.email}')
+    existing_admin.name = ADMIN_NAME
+    existing_admin.email = ADMIN_EMAIL
+    existing_admin.password = hashed
+    existing_admin.role = 'admin'
+    existing_admin.email_verified = True
+    db.session.commit()
+    print(f'Admin credentials updated: {ADMIN_EMAIL} / {ADMIN_PASSWORD}')
   else:
-    hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
     admin = User(
       name=ADMIN_NAME,
       email=ADMIN_EMAIL,
