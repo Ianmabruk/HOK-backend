@@ -190,3 +190,33 @@ class Chat(db.Model):
             'product_id': self.product_id, 'product_title': self.product_title,
             'product_price': self.product_price, 'product_image': self.product_image,
         }
+
+
+class BeforeAfterProject(db.Model):
+    __tablename__ = 'before_after_projects'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    room_type = db.Column(db.String(80))
+    style = db.Column(db.String(80))
+    before_video_url = db.Column(db.Text)
+    after_video_url = db.Column(db.Text)
+    before_poster_url = db.Column(db.Text)
+    after_poster_url = db.Column(db.Text)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'description': self.description,
+            'room_type': self.room_type,
+            'style': self.style,
+            'before_video_url': self.before_video_url,
+            'after_video_url': self.after_video_url,
+            'before_poster_url': self.before_poster_url,
+            'after_poster_url': self.after_poster_url,
+            'sort_order': self.sort_order,
+            'created_at': self.created_at.isoformat(),
+        }
