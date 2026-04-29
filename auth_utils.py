@@ -2,9 +2,10 @@ from flask_jwt_extended import create_access_token, get_jwt, get_jwt_identity
 
 
 def create_user_access_token(user):
+    normalized_role = (user.role or "customer").strip().lower()
     return create_access_token(
         identity=str(user.id),
-        additional_claims={"role": user.role},
+        additional_claims={"role": normalized_role},
     )
 
 

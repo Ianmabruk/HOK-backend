@@ -6,16 +6,17 @@ import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import bcrypt
+from sqlalchemy import func
 from app import app
 from models.models import db, User
 
 with app.app_context():
   ADMIN_NAME = app.config.get('ADMIN_NAME', 'Admin')
-  ADMIN_EMAIL = app.config.get('ADMIN_EMAIL', 'admin@hokinterior.com').strip().lower()
+  ADMIN_EMAIL = (app.config.get('ADMIN_EMAIL', 'admin@hokinterior.com') or '').strip().lower()
   ADMIN_PASSWORD = app.config.get('ADMIN_PASSWORD', 'Admin@1234')
 
   existing_admin = User.query.filter(
-    (User.role == 'admin') | (User.email == ADMIN_EMAIL)
+    (func.lower(User.role) == 'admin') | (func.lower(User.email) == ADMIN_EMAIL)
   ).order_by(User.id.asc()).first()
   hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
 

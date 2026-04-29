@@ -16,6 +16,7 @@ import secrets
 from datetime import datetime, timedelta
 
 import bcrypt
+from sqlalchemy import func
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     jwt_required,
@@ -77,8 +78,19 @@ def _validate_password(pw: str):
     return None
 
 
+def _normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def _get_user_by_email(email: str):
+    normalized = _normalize_email(email)
+    if not normalized:
+        return None
+    return User.query.filter(func.lower(User.email) == normalized).first()
+
+
 def _configured_admin_email() -> str:
-    return (current_app.config.get("ADMIN_EMAIL") or "admin@hokinterior.com").strip().lower()
+    return _normalize_email(current_app.config.get("ADMIN_EMAIL") or "admin@hokinterior.com")
 
 
 def _configured_admin_name() -> str:
@@ -99,7 +111,7 @@ def register():
         return jsonify({"message": "Missing fields"}), 400
 
     name = data["name"].strip()
-    email = data["email"].lower().strip()
+    email = _normalize_email(data["email"])
     password = data["password"]
 
     pw_err = _validate_password(password)
@@ -107,7 +119,7 @@ def register():
         return jsonify({"message": pw_err}), 400
 
     try:
-        if User.query.filter_by(email=email).first():
+        if _get_user_by_email(email):
             return jsonify({"message": "Email already registered"}), 409
 
         configured_admin_email = _configured_admin_email()
@@ -162,7 +174,7 @@ def login():
         return jsonify({"message": "Missing fields"}), 400
 
     try:
-        user = User.query.filter_by(email=data["email"].lower().strip()).first()
+        user = _get_user_by_email(data["email"])
         if not user or not bcrypt.checkpw(data["password"].encode(), user.password.encode()):
             return jsonify({"message": "Invalid email or password"}), 401
 
@@ -250,11 +262,11 @@ def resend_verification():
 @auth_bp.post("/forgot-password")
 def forgot_password():
     data = request.get_json(silent=True) or {}
-    email = data.get("email", "").lower().strip()
+    email = _normalize_email(data.get("email", ""))
     if not email:
         return jsonify({"message": "Email is required"}), 400
 
-    user = User.query.filter_by(email=email).first()
+    user = _get_user_by_email(email)
     # Always return a generic message to prevent email-enumeration attacks
     if user:
         reset_token = _make_token(user.id, "password_reset", hours=1)
