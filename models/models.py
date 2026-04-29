@@ -158,11 +158,19 @@ class OrderItem(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
+    unit_price = db.Column(db.Numeric(10, 2), nullable=True)
+    product_title = db.Column(db.String(255), nullable=True)
+    product_image = db.Column(db.Text, nullable=True)
+    customizations = db.Column(db.JSON, nullable=True)
     product = db.relationship('Product')
 
     def to_dict(self):
         return {'id': self.id, 'product_id': self.product_id,
                 'quantity': self.quantity,
+                'unit_price': float(self.unit_price) if self.unit_price is not None else None,
+                'product_title': self.product_title,
+                'product_image': self.product_image,
+                'customizations': self.customizations,
                 'product': self.product.to_dict() if self.product else None}
 
 
@@ -219,4 +227,19 @@ class BeforeAfterProject(db.Model):
             'after_poster_url': self.after_poster_url,
             'sort_order': self.sort_order,
             'created_at': self.created_at.isoformat(),
+        }
+
+
+class SiteSetting(db.Model):
+    __tablename__ = 'site_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    value = db.Column(db.JSON, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            'key': self.key,
+            'value': self.value,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

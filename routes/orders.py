@@ -27,7 +27,15 @@ def create_order():
         product = Product.query.get(item['product_id'])
         if product and product.stock >= item['quantity']:
             product.stock -= item['quantity']
-            oi = OrderItem(order_id=order.id, product_id=item['product_id'], quantity=item['quantity'])
+            oi = OrderItem(
+                order_id=order.id,
+                product_id=item['product_id'],
+                quantity=item['quantity'],
+                unit_price=product.price,
+                product_title=product.title,
+                product_image=product.image_url,
+                customizations=item.get('customizations') if isinstance(item, dict) else None,
+            )
             db.session.add(oi)
         else:
             db.session.rollback()
