@@ -22,7 +22,14 @@ socketio = SocketIO()
 
 def _allowed_origins(app):
     frontend_url = app.config.get('FRONTEND_URL', '').rstrip('/')
-    origins = {frontend_url, 'http://localhost:5173', 'http://127.0.0.1:5173'}
+    extra_origins = os.getenv('CORS_ALLOWED_ORIGINS', '')
+    origins = {
+        frontend_url,
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'https://hok-interior.netlify.app',
+    }
+    origins.update(origin.strip().rstrip('/') for origin in extra_origins.split(',') if origin.strip())
     return [origin for origin in origins if origin]
 
 
