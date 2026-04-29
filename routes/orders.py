@@ -1,3 +1,5 @@
+import logging
+
 from flask import Blueprint, request, jsonify
 from models.models import db, Order, OrderItem, Product
 from flask_jwt_extended import jwt_required
@@ -6,12 +8,13 @@ from auth_utils import current_user_id, current_user_role
 from services.email_service import send_order_confirmation_email
 
 orders_bp = Blueprint('orders', __name__)
+logger = logging.getLogger(__name__)
 
 
 @orders_bp.post('/orders')
 @jwt_required()
 def create_order():
-    data = request.get_json()
+    data = request.get_json() or {}
     items_data = data.get('items', [])
     if not items_data:
         return jsonify({'message': 'No items'}), 400
@@ -28,14 +31,34 @@ def create_order():
     db.session.add(order)
     db.session.flush()
 
-    for item in items_data:
-        product = Product.query.get(item['product_id'])
-        if product and product.stock >= item['quantity']:
-            product.stock -= item['quantity']
+    for idx, item in enumerate(items_data, start=1):
+        if not isinstance(item, dict):
+            db.session.rollback()
+            return jsonify({'message': f'Invalid order item at position {idx}'}), 400
+
+        product_id = item.get('product_id')
+        quantity = item.get('quantity')
+        if product_id is None or quantity is None:
+            db.session.rollback()
+            return jsonify({'message': f'Order item #{idx} is missing product_id or quantity'}), 400
+
+        try:
+            quantity = int(quantity)
+        except (TypeError, ValueError):
+            db.session.rollback()
+            return jsonify({'message': f'Order item #{idx} has invalid quantity'}), 400
+
+        if quantity <= 0:
+            db.session.rollback()
+            return jsonify({'message': f'Order item #{idx} quantity must be at least 1'}), 400
+
+        product = Product.query.get(product_id)
+        if product and product.stock >= quantity:
+            product.stock -= quantity
             oi = OrderItem(
                 order_id=order.id,
-                product_id=item['product_id'],
-                quantity=item['quantity'],
+                product_id=product_id,
+                quantity=quantity,
                 unit_price=product.price,
                 product_title=product.title,
                 product_image=product.image_url,
@@ -44,7 +67,7 @@ def create_order():
             db.session.add(oi)
         else:
             db.session.rollback()
-            return jsonify({'message': f'Insufficient stock for product {item["product_id"]}'}), 400
+            return jsonify({'message': f'Insufficient stock for product {product_id}'}), 400
 
     db.session.commit()
 
@@ -55,14 +78,17 @@ def create_order():
     ]).strip() or (order.user.name if order.user else 'there')
 
     if customer_email:
-        send_order_confirmation_email(
-            to_email=customer_email,
-            name=customer_name,
-            order_id=order.id,
-            total_price=float(order.total_price or 0),
-            items=[item.to_dict() for item in order.items],
-            shipping_info=shipping_info,
-        )
+        try:
+            send_order_confirmation_email(
+                to_email=customer_email,
+                name=customer_name,
+                order_id=order.id,
+                total_price=float(order.total_price or 0),
+                items=[item.to_dict() for item in order.items],
+                shipping_info=shipping_info,
+            )
+        except Exception:
+            logger.exception('Order confirmation email dispatch failed for order_id=%s', order.id)
 
     return jsonify(order.to_dict()), 201
 
