@@ -3,6 +3,7 @@ from models.models import db, Order, OrderItem, Product
 from flask_jwt_extended import jwt_required
 
 from auth_utils import current_user_id, current_user_role
+from services.email_service import send_order_confirmation_email
 
 orders_bp = Blueprint('orders', __name__)
 
@@ -15,10 +16,14 @@ def create_order():
     if not items_data:
         return jsonify({'message': 'No items'}), 400
 
+    shipping_info = data.get('shipping_info', {})
+    if not isinstance(shipping_info, dict):
+        shipping_info = {}
+
     order = Order(
         user_id=current_user_id(),
         total_price=data.get('total_price', 0),
-        shipping_info=data.get('shipping_info', {})
+        shipping_info=shipping_info,
     )
     db.session.add(order)
     db.session.flush()
@@ -42,6 +47,23 @@ def create_order():
             return jsonify({'message': f'Insufficient stock for product {item["product_id"]}'}), 400
 
     db.session.commit()
+
+    customer_email = (shipping_info.get('email') or (order.user.email if order.user else '') or '').strip()
+    customer_name = ' '.join([
+        str(shipping_info.get('first_name') or '').strip(),
+        str(shipping_info.get('last_name') or '').strip(),
+    ]).strip() or (order.user.name if order.user else 'there')
+
+    if customer_email:
+        send_order_confirmation_email(
+            to_email=customer_email,
+            name=customer_name,
+            order_id=order.id,
+            total_price=float(order.total_price or 0),
+            items=[item.to_dict() for item in order.items],
+            shipping_info=shipping_info,
+        )
+
     return jsonify(order.to_dict()), 201
 
 

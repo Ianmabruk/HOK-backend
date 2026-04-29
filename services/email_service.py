@@ -186,6 +186,70 @@ def _password_changed_body(name: str) -> str:
     )
 
 
+def _order_confirmation_body(name: str, order_id: int, total_price: float, items: list[dict], shipping_info: dict | None = None) -> str:
+    safe_name = escape(name or 'there')
+    shipping_info = shipping_info if isinstance(shipping_info, dict) else {}
+
+    lines = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = escape(str(item.get('product_title') or (item.get('product') or {}).get('title') or 'Product'))
+        quantity = int(item.get('quantity') or 0)
+        unit_price = float(item.get('unit_price') or ((item.get('product') or {}).get('price') or 0))
+        line_total = unit_price * quantity
+        lines.append(
+            '<tr>'
+            f'<td style="padding:8px 0;color:#2c2c2c;font-size:14px;">{title}</td>'
+            f'<td style="padding:8px 0;color:#5a5050;font-size:13px;text-align:center;">{quantity}</td>'
+            f'<td style="padding:8px 0;color:#2c2c2c;font-size:14px;text-align:right;">${line_total:,.2f}</td>'
+            '</tr>'
+        )
+
+    items_table = (
+        '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
+        'style="border-collapse:collapse;margin:8px 0 4px;">'
+        '<thead>'
+        '<tr>'
+        '<th style="text-align:left;padding:8px 0;border-bottom:1px solid #e5ddd4;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#9a8a7a;">Item</th>'
+        '<th style="text-align:center;padding:8px 0;border-bottom:1px solid #e5ddd4;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#9a8a7a;">Qty</th>'
+        '<th style="text-align:right;padding:8px 0;border-bottom:1px solid #e5ddd4;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#9a8a7a;">Total</th>'
+        '</tr>'
+        '</thead>'
+        '<tbody>'
+        f"{''.join(lines) if lines else '<tr><td colspan=\"3\" style=\"padding:10px 0;color:#5a5050;\">No line items were recorded.</td></tr>'}"
+        '</tbody>'
+        '</table>'
+    )
+
+    shipping_name = ' '.join([
+        str(shipping_info.get('first_name') or '').strip(),
+        str(shipping_info.get('last_name') or '').strip(),
+    ]).strip() or safe_name
+    shipping_city = escape(str(shipping_info.get('city') or '').strip())
+    shipping_country = escape(str(shipping_info.get('country') or '').strip())
+    shipping_address = escape(str(shipping_info.get('address') or '').strip())
+
+    shipping_block = ''
+    if shipping_address or shipping_city or shipping_country:
+        location_bits = ', '.join([bit for bit in [shipping_city, shipping_country] if bit])
+        shipping_block = (
+            _divider()
+            + _p('<strong>Shipping to:</strong>')
+            + _p(f"{escape(shipping_name)}<br/>{shipping_address}<br/>{location_bits}")
+        )
+
+    return (
+        _h2('Order received')
+        + _p(f'Thank you, {safe_name}. Your order <strong>#{order_id}</strong> has been received and is now being processed.')
+        + items_table
+        + _p(f'<strong>Order Total:</strong> ${float(total_price or 0):,.2f}')
+        + shipping_block
+        + _divider()
+        + _p('We will send another update when your order status changes.', muted=True)
+    )
+
+
 # ─── Core delivery engine ─────────────────────────────────────────────────────
 
 def _plain_text_content(html: str) -> str:
@@ -333,3 +397,17 @@ def _admin_message_body(name: str, message: str) -> str:
 def send_admin_message(to_email: str, name: str, subject: str, message: str, delivery_log_id: int | None = None) -> None:
     """Admin-composed message sent to a customer."""
     send_email(to_email, subject, _wrap(_admin_message_body(name, message), subject), delivery_log_id=delivery_log_id)
+
+
+def send_order_confirmation_email(
+    to_email: str,
+    name: str,
+    order_id: int,
+    total_price: float,
+    items: list[dict],
+    shipping_info: dict | None = None,
+) -> None:
+    """Order confirmation sent immediately after checkout."""
+    subject = f'Order Confirmation #{order_id} — HOK Interior Designs'
+    body = _order_confirmation_body(name, order_id, total_price, items, shipping_info=shipping_info)
+    send_email(to_email, subject, _wrap(body, subject))
