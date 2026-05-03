@@ -25,7 +25,7 @@ from flask_jwt_extended import (
 from auth_utils import create_user_access_token, current_user_id
 from models.models import EmailToken, User, db
 from services.email_service import (
-    send_login_alert,
+    send_login_notice,
     send_password_changed,
     send_reset_email,
     send_verify_email,
@@ -185,13 +185,18 @@ def login():
         user.last_login_ip = client_ip
         db.session.commit()
 
-        # Fire login-alert email asynchronously if IP changed (suspicious activity)
-        if prev_ip and prev_ip != client_ip:
-            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
-            change_url = f"{frontend_url}/forgot-password"
-            time_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-            send_login_alert(user.email, user.name, client_ip, time_str, change_url)
-            logger.info("[auth] Login-alert sent to %s (IP changed: %s → %s)", user.email, prev_ip, client_ip)
+        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+        change_url = f"{frontend_url}/forgot-password"
+        time_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        send_login_notice(
+            user.email,
+            user.name,
+            client_ip,
+            time_str,
+            change_url,
+            is_new_location=bool(prev_ip and prev_ip != client_ip),
+        )
+        logger.info("[auth] Login notice sent to %s", user.email)
 
         jwt_token = create_user_access_token(user)
         return jsonify({"user": user.to_dict(), "token": jwt_token}), 200

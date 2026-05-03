@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from models.models import EmailDeliveryLog, User, db
+from models.models import EmailDeliveryLog, User, WishlistItem, db
 from flask_jwt_extended import jwt_required
 
 from auth_utils import current_user_id, current_user_role
@@ -108,3 +108,47 @@ def get_email_logs():
     limit = max(1, min(limit, 200))
     logs = EmailDeliveryLog.query.order_by(EmailDeliveryLog.created_at.desc()).limit(limit).all()
     return jsonify([log.to_dict() for log in logs])
+
+
+# ─── Wishlist ─────────────────────────────────────────────────────────────────
+
+@users_bp.get('/wishlist')
+@jwt_required()
+def get_wishlist():
+    uid = current_user_id()
+    items = WishlistItem.query.filter_by(user_id=uid).all()
+    return jsonify([i.product_id for i in items])
+
+
+@users_bp.post('/wishlist/<int:product_id>')
+@jwt_required()
+def add_to_wishlist(product_id):
+    uid = current_user_id()
+    existing = WishlistItem.query.filter_by(user_id=uid, product_id=product_id).first()
+    if not existing:
+        db.session.add(WishlistItem(user_id=uid, product_id=product_id))
+        db.session.commit()
+    return jsonify({'product_id': product_id}), 200
+
+
+@users_bp.delete('/wishlist/<int:product_id>')
+@jwt_required()
+def remove_from_wishlist(product_id):
+    uid = current_user_id()
+    WishlistItem.query.filter_by(user_id=uid, product_id=product_id).delete()
+    db.session.commit()
+    return jsonify({'product_id': product_id}), 200
+
+
+@users_bp.put('/wishlist/sync')
+@jwt_required()
+def sync_wishlist():
+    """Bulk-replace the user's wishlist — used on login to merge local + server."""
+    uid = current_user_id()
+    data = request.get_json(silent=True) or {}
+    product_ids = [int(i) for i in (data.get('product_ids') or []) if str(i).isdigit()]
+    WishlistItem.query.filter_by(user_id=uid).delete()
+    for pid in product_ids:
+        db.session.add(WishlistItem(user_id=uid, product_id=pid))
+    db.session.commit()
+    return jsonify(product_ids), 200

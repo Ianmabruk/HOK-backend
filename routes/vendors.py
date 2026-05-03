@@ -14,11 +14,7 @@ def require_admin():
 
 
 @vendors_bp.get('/vendors')
-@jwt_required()
 def get_vendors():
-    err = require_admin()
-    if err:
-        return err
     return jsonify([v.to_dict() for v in Vendor.query.all()])
 
 

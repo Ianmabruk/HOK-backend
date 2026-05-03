@@ -23,6 +23,25 @@ from sendgrid.helpers.mail import Email, Mail
 logger = logging.getLogger(__name__)
 
 
+def _setting(key: str, *, app=None, default: str = '', aliases: tuple[str, ...] = ()) -> str:
+    if app is None and has_app_context():
+        app = current_app._get_current_object()
+
+    candidates = (key, *aliases)
+    if app is not None:
+        for candidate in candidates:
+            value = app.config.get(candidate)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+
+    for candidate in candidates:
+        value = os.environ.get(candidate)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+
+    return default
+
+
 # ─── HTML base template ───────────────────────────────────────────────────────
 
 _BASE = """\
@@ -152,7 +171,7 @@ def _reset_password_body(name: str, reset_url: str) -> str:
     )
 
 
-def _login_alert_body(name: str, ip: str, time_str: str, change_url: str) -> str:
+def _login_notice_body(name: str, ip: str, time_str: str, change_url: str, is_new_location: bool = False) -> str:
     info_box = (
         '<table cellpadding="0" cellspacing="0" role="presentation" width="100%"'
         ' style="background:#f5f0eb;border-radius:3px;padding:16px 20px;margin-bottom:24px;">'
@@ -162,12 +181,22 @@ def _login_alert_body(name: str, ip: str, time_str: str, change_url: str) -> str
         f'<strong style="color:#2c2c2c;">Time:</strong>&nbsp;{time_str}</td></tr>'
         '</table>'
     )
+    heading = 'New sign-in detected' if is_new_location else 'Sign-in successful'
+    intro = (
+        f"Hi {name}, we noticed a sign-in to your account from a <strong>new location</strong>."
+        if is_new_location
+        else f'Hi {name}, this is a confirmation that your account was just signed in.'
+    )
+    action_text = (
+        "If this wasn't you, reset your password immediately:"
+        if is_new_location
+        else "If this wasn't you, please reset your password immediately:"
+    )
     return (
-        _h2("New sign-in detected")
-        + _p(f"Hi {name}, we noticed a sign-in to your account from a <strong>new location</strong>.")
+        _h2(heading)
+        + _p(intro)
         + info_box
-        + _p("If this was you, no action is needed. If you don't recognise this activity, "
-             "change your password immediately:")
+        + _p(action_text)
         + f'<p style="text-align:center;margin:28px 0;">{_btn("Change My Password", change_url)}</p>'
     )
 
@@ -186,7 +215,16 @@ def _password_changed_body(name: str) -> str:
     )
 
 
-def _order_confirmation_body(name: str, order_id: int, total_price: float, items: list[dict], shipping_info: dict | None = None) -> str:
+def _order_confirmation_body(
+    name: str,
+    order_id: int,
+    total_price: float,
+    items: list[dict],
+    shipping_info: dict | None = None,
+    is_quote_request: bool = False,
+    currency_symbol: str = '$',
+    currency_code: str = 'USD',
+) -> str:
     safe_name = escape(name or 'there')
     shipping_info = shipping_info if isinstance(shipping_info, dict) else {}
 
@@ -202,7 +240,7 @@ def _order_confirmation_body(name: str, order_id: int, total_price: float, items
             '<tr>'
             f'<td style="padding:8px 0;color:#2c2c2c;font-size:14px;">{title}</td>'
             f'<td style="padding:8px 0;color:#5a5050;font-size:13px;text-align:center;">{quantity}</td>'
-            f'<td style="padding:8px 0;color:#2c2c2c;font-size:14px;text-align:right;">${line_total:,.2f}</td>'
+            f'<td style="padding:8px 0;color:#2c2c2c;font-size:14px;text-align:right;">{currency_symbol}{line_total:,.2f}</td>'
             '</tr>'
         )
 
@@ -240,13 +278,24 @@ def _order_confirmation_body(name: str, order_id: int, total_price: float, items
         )
 
     return (
-        _h2('Order received')
-        + _p(f'Thank you, {safe_name}. Your order <strong>#{order_id}</strong> has been received and is now being processed.')
+        _h2('Quote request received' if is_quote_request else 'Order received')
+        + _p(
+            (
+                f'Thank you, {safe_name}. Your quote request <strong>#{order_id}</strong> has been received. '
+                'Our team will review it and contact you shortly.'
+            )
+            if is_quote_request
+            else f'Thank you, {safe_name}. Your order <strong>#{order_id}</strong> has been received and is now being processed.'
+        )
         + items_table
-        + _p(f'<strong>Order Total:</strong> ${float(total_price or 0):,.2f}')
+        + _p(f'<strong>{"Estimated Total" if is_quote_request else "Order Total"}:</strong> {currency_symbol}{float(total_price or 0):,.2f}')
         + shipping_block
         + _divider()
-        + _p('We will send another update when your order status changes.', muted=True)
+        + _p(
+            'We will send another update when your quote is ready.' if is_quote_request
+            else 'We will send another update when your order status changes.',
+            muted=True,
+        )
     )
 
 
@@ -281,35 +330,43 @@ def _update_delivery_log(app, delivery_log_id, **fields) -> None:
 
 
 def sendgrid_health_payload() -> dict:
-    api_key_configured = bool((os.environ.get('SENDGRID_API_KEY') or '').strip())
-    from_email = (os.environ.get('FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL') or '').strip()
+    api_key = _setting('SENDGRID_API_KEY')
+    from_email = _setting('FROM_EMAIL', aliases=('SENDGRID_FROM_EMAIL',))
+    from_name = _setting('EMAIL_FROM_NAME', default='HOK Interior Designs')
+    missing = []
+    if not api_key:
+        missing.append('SENDGRID_API_KEY')
+    if not from_email:
+        missing.append('FROM_EMAIL')
+
     return {
         'service': 'sendgrid',
-        'ready': api_key_configured and bool(from_email),
+        'ready': bool(api_key and from_email),
         'checks': {
-            'sendgrid_api_key_configured': api_key_configured,
+            'sendgrid_api_key_configured': bool(api_key),
             'from_email_configured': bool(from_email),
-            'email_from_name_configured': bool((os.environ.get('EMAIL_FROM_NAME') or '').strip()),
+            'email_from_name_configured': bool(from_name),
         },
+        'missing': missing,
         'provider': 'sendgrid',
     }
 
 
 def _deliver(app, to_email: str, subject: str, html: str, delivery_log_id: int | None = None) -> None:
     """Synchronous delivery — called from a background thread."""
-    api_key = (os.environ.get("SENDGRID_API_KEY") or "").strip()
+    api_key = _setting('SENDGRID_API_KEY', app=app)
     if not api_key:
         logger.error("[email] SENDGRID_API_KEY not set — email to %s skipped", to_email)
         _update_delivery_log(app, delivery_log_id, status='failed', provider='sendgrid', error_message='SENDGRID_API_KEY not set')
         return
 
-    from_addr = (os.environ.get("FROM_EMAIL") or os.environ.get("SENDGRID_FROM_EMAIL") or "").strip()
+    from_addr = _setting('FROM_EMAIL', app=app, aliases=('SENDGRID_FROM_EMAIL',))
     if not from_addr:
         logger.error("[email] FROM_EMAIL not set — email to %s skipped", to_email)
         _update_delivery_log(app, delivery_log_id, status='failed', provider='sendgrid', error_message='FROM_EMAIL not set')
         return
 
-    from_name = (os.environ.get("EMAIL_FROM_NAME") or "HOK Interior Designs").strip() or "HOK Interior Designs"
+    from_name = _setting('EMAIL_FROM_NAME', app=app, default='HOK Interior Designs')
 
     message = Mail(
         from_email=Email(from_addr, from_name),
@@ -369,10 +426,22 @@ def send_reset_email(to_email: str, name: str, reset_url: str) -> None:
     send_email(to_email, subject, _wrap(_reset_password_body(name, reset_url), subject))
 
 
+def send_login_notice(
+    to_email: str,
+    name: str,
+    ip: str,
+    time_str: str,
+    change_url: str,
+    is_new_location: bool = False,
+) -> None:
+    """Login activity notification after successful sign-in."""
+    subject = "Sign-in activity — HOK Interior Designs"
+    send_email(to_email, subject, _wrap(_login_notice_body(name, ip, time_str, change_url, is_new_location=is_new_location), subject))
+
+
 def send_login_alert(to_email: str, name: str, ip: str, time_str: str, change_url: str) -> None:
-    """Login from new IP alert — suspicious activity notification."""
-    subject = "New sign-in detected — HOK Interior Designs"
-    send_email(to_email, subject, _wrap(_login_alert_body(name, ip, time_str, change_url), subject))
+    """Backward-compatible alias for login notice calls."""
+    send_login_notice(to_email, name, ip, time_str, change_url, is_new_location=True)
 
 
 def send_password_changed(to_email: str, name: str) -> None:
@@ -406,8 +475,21 @@ def send_order_confirmation_email(
     total_price: float,
     items: list[dict],
     shipping_info: dict | None = None,
+    is_quote_request: bool = False,
+    currency_symbol: str = '$',
+    currency_code: str = 'USD',
 ) -> None:
     """Order confirmation sent immediately after checkout."""
-    subject = f'Order Confirmation #{order_id} — HOK Interior Designs'
-    body = _order_confirmation_body(name, order_id, total_price, items, shipping_info=shipping_info)
+    subject_prefix = 'Quote Request' if is_quote_request else 'Order Confirmation'
+    subject = f'{subject_prefix} #{order_id} — HOK Interior Designs'
+    body = _order_confirmation_body(
+        name,
+        order_id,
+        total_price,
+        items,
+        shipping_info=shipping_info,
+        is_quote_request=is_quote_request,
+        currency_symbol=currency_symbol,
+        currency_code=currency_code,
+    )
     send_email(to_email, subject, _wrap(body, subject))
