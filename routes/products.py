@@ -142,9 +142,10 @@ def delete_product(pid):
     if err:
         return err
     p = Product.query.get_or_404(pid)
-    # Nullify FK references in order_items so the delete doesn't fail
-    from models.models import OrderItem
-    OrderItem.query.filter_by(product_id=pid).update({'product_id': None})
+    from models.models import OrderItem, WishlistItem
+    # Remove order items and wishlist entries that reference this product
+    OrderItem.query.filter_by(product_id=pid).delete(synchronize_session='fetch')
+    WishlistItem.query.filter_by(product_id=pid).delete(synchronize_session='fetch')
     db.session.delete(p)
     db.session.commit()
     return jsonify({'message': 'Deleted'})
