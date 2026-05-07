@@ -189,9 +189,10 @@ def login():
         client_ip = _client_ip()
         prev_ip = user.last_login_ip
 
-        # Persist updated IP
-        user.last_login_ip = client_ip
-        db.session.commit()
+        # Persist IP only when it changes to avoid unnecessary write latency.
+        if prev_ip != client_ip:
+            user.last_login_ip = client_ip
+            db.session.commit()
 
         frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
         change_url = f"{frontend_url}/forgot-password"
