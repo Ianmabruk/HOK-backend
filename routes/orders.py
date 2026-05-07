@@ -1,7 +1,7 @@
 import logging
 
 from flask import Blueprint, request, jsonify
-from models.models import db, Order, OrderItem, Product
+from models.models import db, Order, OrderItem, Product, User
 from flask_jwt_extended import jwt_required
 
 from auth_utils import current_user_id, current_user_role
@@ -80,11 +80,16 @@ def create_order():
 
     db.session.commit()
 
-    customer_email = (shipping_info.get('email') or (order.user.email if order.user else '') or '').strip()
+    user_account = order.user or db.session.get(User, order.user_id)
+    customer_email = (
+        shipping_info.get('email')
+        or (user_account.email if user_account else '')
+        or ''
+    ).strip()
     customer_name = ' '.join([
         str(shipping_info.get('first_name') or '').strip(),
         str(shipping_info.get('last_name') or '').strip(),
-    ]).strip() or (order.user.name if order.user else 'there')
+    ]).strip() or (user_account.name if user_account else 'there')
 
     if customer_email:
         try:
