@@ -25,20 +25,22 @@ def reset_sales_data():
         deleted_orders = Order.query.count()
         deleted_items = OrderItem.query.count()
 
-        OrderItem.query.delete(synchronize_session=False)
-        Order.query.delete(synchronize_session=False)
+        engine_name = db.session.bind.dialect.name if db.session.bind is not None else ''
 
-        # Best-effort sequence reset so new orders start from a fresh numbering flow.
-        engine_name = db.session.bind.dialect.name
-        if engine_name == 'sqlite':
-            has_sqlite_sequence = db.session.execute(
-                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_sequence' LIMIT 1")
-            ).scalar()
-            if has_sqlite_sequence:
-                db.session.execute(text("DELETE FROM sqlite_sequence WHERE name IN ('orders', 'order_items')"))
-        elif engine_name == 'postgresql':
-            db.session.execute(text("ALTER SEQUENCE IF EXISTS orders_id_seq RESTART WITH 1"))
-            db.session.execute(text("ALTER SEQUENCE IF EXISTS order_items_id_seq RESTART WITH 1"))
+        if engine_name == 'postgresql':
+            # Fast and reliable on Postgres; also resets identity values.
+            db.session.execute(text('TRUNCATE TABLE order_items, orders RESTART IDENTITY CASCADE'))
+        else:
+            OrderItem.query.delete(synchronize_session=False)
+            Order.query.delete(synchronize_session=False)
+
+            # Best-effort sequence reset for SQLite only.
+            if engine_name == 'sqlite':
+                has_sqlite_sequence = db.session.execute(
+                    text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_sequence' LIMIT 1")
+                ).scalar()
+                if has_sqlite_sequence:
+                    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name IN ('orders', 'order_items')"))
 
         db.session.commit()
     except Exception:
