@@ -200,6 +200,38 @@ class Chat(db.Model):
         }
 
 
+class PortfolioProject(db.Model):
+    __tablename__ = 'portfolio_projects'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    summary = db.Column(db.String(400))
+    description = db.Column(db.Text)
+    image_url = db.Column(db.Text)
+    room_type = db.Column(db.String(80))
+    style = db.Column(db.String(80))
+    year = db.Column(db.String(10))
+    location = db.Column(db.String(120))
+    sort_order = db.Column(db.Integer, default=0)
+    is_published = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'summary': self.summary,
+            'description': self.description,
+            'image_url': self.image_url,
+            'room_type': self.room_type,
+            'style': self.style,
+            'year': self.year,
+            'location': self.location,
+            'sort_order': self.sort_order,
+            'is_published': self.is_published,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
 class BeforeAfterProject(db.Model):
     __tablename__ = 'before_after_projects'
     id = db.Column(db.Integer, primary_key=True)
@@ -212,6 +244,7 @@ class BeforeAfterProject(db.Model):
     before_poster_url = db.Column(db.Text)
     after_poster_url = db.Column(db.Text)
     sort_order = db.Column(db.Integer, default=0)
+    is_published = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -226,6 +259,7 @@ class BeforeAfterProject(db.Model):
             'before_poster_url': self.before_poster_url,
             'after_poster_url': self.after_poster_url,
             'sort_order': self.sort_order,
+            'is_published': self.is_published,
             'created_at': self.created_at.isoformat(),
         }
 

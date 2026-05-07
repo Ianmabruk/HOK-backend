@@ -16,6 +16,7 @@ from routes.users import users_bp
 from routes.vendors import vendors_bp
 from routes.before_after import before_after_bp
 from routes.site_settings import site_settings_bp
+from routes.portfolio import portfolio_bp
 from services.email_service import sendgrid_health_payload
 from sockets.chat import register_socket_events
 
@@ -58,6 +59,18 @@ def _ensure_order_item_columns(app):
     app.logger.info('Applied lightweight order_items schema updates: %s', ', '.join(alterations))
 
 
+def _ensure_before_after_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'before_after_projects' not in tables:
+        return
+    existing = {c['name'] for c in inspector.get_columns('before_after_projects')}
+    if 'is_published' not in existing:
+        with db.engine.begin() as conn:
+            conn.execute(text('ALTER TABLE before_after_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT 1'))
+        app.logger.info('Added is_published column to before_after_projects')
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -77,12 +90,14 @@ def create_app():
     app.register_blueprint(vendors_bp, url_prefix='/api')
     app.register_blueprint(before_after_bp, url_prefix='/api')
     app.register_blueprint(site_settings_bp, url_prefix='/api')
+    app.register_blueprint(portfolio_bp, url_prefix='/api')
 
     register_socket_events(socketio)
 
     with app.app_context():
         db.create_all()
         _ensure_order_item_columns(app)
+        _ensure_before_after_columns(app)
 
     uploads_root = Path(app.config['UPLOAD_FOLDER'])
     uploads_root.mkdir(parents=True, exist_ok=True)

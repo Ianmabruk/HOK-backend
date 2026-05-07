@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 
 @before_after_bp.get("/before-after")
 def list_projects():
+    # Use isnot(False) so existing NULL rows (before migration) are also included
+    projects = BeforeAfterProject.query.filter(
+        BeforeAfterProject.is_published.isnot(False)
+    ).order_by(
+        BeforeAfterProject.sort_order, BeforeAfterProject.created_at
+    ).all()
+    return jsonify([p.to_dict() for p in projects]), 200
+
+
+@before_after_bp.get("/before-after/all")
+@jwt_required()
+def list_all_projects():
+    """Admin-only: returns all projects including unpublished."""
+    if current_user_role() != 'admin':
+        return jsonify({'message': 'Admin only'}), 403
     projects = BeforeAfterProject.query.order_by(
         BeforeAfterProject.sort_order, BeforeAfterProject.created_at
     ).all()
@@ -49,6 +64,7 @@ def create_project():
         before_poster_url=data.get("before_poster_url", "").strip() or None,
         after_poster_url=data.get("after_poster_url", "").strip() or None,
         sort_order=int(data.get("sort_order", 0)),
+        is_published=bool(data.get("is_published", True)),
     )
     db.session.add(project)
     db.session.commit()
@@ -87,6 +103,8 @@ def update_project(project_id):
         project.after_poster_url = data["after_poster_url"].strip() or None
     if "sort_order" in data:
         project.sort_order = int(data["sort_order"])
+    if "is_published" in data:
+        project.is_published = bool(data["is_published"])
 
     db.session.commit()
     return jsonify(project.to_dict()), 200
