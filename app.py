@@ -17,6 +17,7 @@ from routes.vendors import vendors_bp
 from routes.before_after import before_after_bp
 from routes.site_settings import site_settings_bp
 from routes.portfolio import portfolio_bp
+from routes.admin_tools import admin_tools_bp
 from services.email_service import sendgrid_health_payload
 from sockets.chat import register_socket_events
 
@@ -105,6 +106,7 @@ def create_app():
     app.register_blueprint(before_after_bp, url_prefix='/api')
     app.register_blueprint(site_settings_bp, url_prefix='/api')
     app.register_blueprint(portfolio_bp, url_prefix='/api')
+    app.register_blueprint(admin_tools_bp, url_prefix='/api')
 
     register_socket_events(socketio)
 
