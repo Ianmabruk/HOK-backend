@@ -81,7 +81,7 @@ def _ensure_before_after_columns(app):
     existing = {c['name'] for c in inspector.get_columns('before_after_projects')}
     if 'is_published' not in existing:
         with db.engine.begin() as conn:
-            conn.execute(text('ALTER TABLE before_after_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT 1'))
+            conn.execute(text('ALTER TABLE before_after_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT TRUE'))
         app.logger.info('Added is_published column to before_after_projects')
 
 

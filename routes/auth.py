@@ -94,7 +94,7 @@ def _get_user_by_email(email: str):
 
 def _bcrypt_rounds() -> int:
     rounds = int(current_app.config.get('BCRYPT_LOG_ROUNDS', 11))
-    return min(max(rounds, 10), 14)
+    return min(max(rounds, 8), 14)
 
 
 def _configured_admin_email() -> str:

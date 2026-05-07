@@ -45,7 +45,7 @@ class Config:
     ADMIN_NAME = os.getenv('ADMIN_NAME', 'Admin').strip() or 'Admin'
     ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@hokinterior.com').strip().lower()
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@1234')
-    BCRYPT_LOG_ROUNDS = int(os.getenv('BCRYPT_LOG_ROUNDS', '10'))
+    BCRYPT_LOG_ROUNDS = int(os.getenv('BCRYPT_LOG_ROUNDS', '9'))
 
     # Optional Cloudinary media storage
     CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME')
