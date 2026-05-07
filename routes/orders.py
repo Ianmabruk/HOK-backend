@@ -71,6 +71,7 @@ def create_order():
             product_id=product_id,
             quantity=quantity,
             unit_price=product.price,
+            unit_cost=product.cost_price,
             product_title=product.title,
             product_image=product.image_url,
             customizations=item.get('customizations') if isinstance(item, dict) else None,

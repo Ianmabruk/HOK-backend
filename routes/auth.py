@@ -86,7 +86,15 @@ def _get_user_by_email(email: str):
     normalized = _normalize_email(email)
     if not normalized:
         return None
+    exact = User.query.filter_by(email=normalized).first()
+    if exact:
+        return exact
     return User.query.filter(func.lower(User.email) == normalized).first()
+
+
+def _bcrypt_rounds() -> int:
+    rounds = int(current_app.config.get('BCRYPT_LOG_ROUNDS', 11))
+    return min(max(rounds, 10), 14)
 
 
 def _configured_admin_email() -> str:
@@ -131,7 +139,7 @@ def register():
 
         role = "admin" if wants_admin_account and not has_admin else "customer"
         email_verified = role == "admin"
-        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=_bcrypt_rounds())).decode()
 
         user = User(name=name, email=email, password=hashed, role=role, email_verified=email_verified)
         db.session.add(user)
@@ -188,15 +196,16 @@ def login():
         frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
         change_url = f"{frontend_url}/forgot-password"
         time_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-        send_login_notice(
-            user.email,
-            user.name,
-            client_ip,
-            time_str,
-            change_url,
-            is_new_location=bool(prev_ip and prev_ip != client_ip),
-        )
-        logger.info("[auth] Login notice sent to %s", user.email)
+        if prev_ip and prev_ip != client_ip:
+            send_login_notice(
+                user.email,
+                user.name,
+                client_ip,
+                time_str,
+                change_url,
+                is_new_location=True,
+            )
+            logger.info("[auth] Login notice sent to %s", user.email)
 
         jwt_token = create_user_access_token(user)
         return jsonify({"user": user.to_dict(), "token": jwt_token}), 200
@@ -310,7 +319,7 @@ def reset_password():
         return jsonify({"message": "Reset link has expired. Please request a new one."}), 400
 
     user = record.user
-    user.password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    user.password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=_bcrypt_rounds())).decode()
     record.used = True
     db.session.commit()
 

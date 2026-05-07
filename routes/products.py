@@ -85,6 +85,7 @@ def create_product():
     p = Product(
         title=data['title'], description=data.get('description'),
         price=data['price'], stock=data.get('stock', 0),
+        cost_price=data.get('cost_price'),
         category=_normalize_category(data.get('category')) or None, image_url=data.get('image_url'),
         video_url=data.get('video_url'), vendor_id=data.get('vendor_id') or None
     )
@@ -101,7 +102,7 @@ def update_product(pid):
         return err
     p = Product.query.get_or_404(pid)
     data = request.get_json()
-    for field in ('title', 'description', 'price', 'stock', 'image_url', 'video_url', 'vendor_id'):
+    for field in ('title', 'description', 'price', 'cost_price', 'stock', 'image_url', 'video_url', 'vendor_id'):
         if field in data:
             setattr(p, field, data[field] if data[field] != '' else None)
     if 'category' in data:

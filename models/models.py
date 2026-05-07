@@ -108,6 +108,7 @@ class Product(db.Model):
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     price = db.Column(db.Numeric(10, 2), nullable=False)
+    cost_price = db.Column(db.Numeric(10, 2), nullable=True)
     video_url = db.Column(db.Text)
     image_url = db.Column(db.Text)
     stock = db.Column(db.Integer, default=0)
@@ -119,6 +120,7 @@ class Product(db.Model):
         return {
             'id': self.id, 'title': self.title, 'description': self.description,
             'price': float(self.price), 'video_url': self.video_url,
+            'cost_price': float(self.cost_price) if self.cost_price is not None else None,
             'image_url': self.image_url, 'stock': self.stock,
             'category': self.category, 'vendor_id': self.vendor_id,
             'created_at': self.created_at.isoformat()
@@ -159,6 +161,7 @@ class OrderItem(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
     unit_price = db.Column(db.Numeric(10, 2), nullable=True)
+    unit_cost = db.Column(db.Numeric(10, 2), nullable=True)
     product_title = db.Column(db.String(255), nullable=True)
     product_image = db.Column(db.Text, nullable=True)
     customizations = db.Column(db.JSON, nullable=True)
@@ -168,6 +171,7 @@ class OrderItem(db.Model):
         return {'id': self.id, 'product_id': self.product_id,
                 'quantity': self.quantity,
                 'unit_price': float(self.unit_price) if self.unit_price is not None else None,
+                'unit_cost': float(self.unit_cost) if self.unit_cost is not None else None,
                 'product_title': self.product_title,
                 'product_image': self.product_image,
                 'customizations': self.customizations,

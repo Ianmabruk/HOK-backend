@@ -43,6 +43,8 @@ def _ensure_order_item_columns(app):
 
     if 'unit_price' not in existing_columns:
         alterations.append('ALTER TABLE order_items ADD COLUMN unit_price NUMERIC(10, 2)')
+    if 'unit_cost' not in existing_columns:
+        alterations.append('ALTER TABLE order_items ADD COLUMN unit_cost NUMERIC(10, 2)')
     if 'product_title' not in existing_columns:
         alterations.append('ALTER TABLE order_items ADD COLUMN product_title VARCHAR(255)')
     if 'product_image' not in existing_columns:
@@ -57,6 +59,18 @@ def _ensure_order_item_columns(app):
         for statement in alterations:
             connection.execute(text(statement))
     app.logger.info('Applied lightweight order_items schema updates: %s', ', '.join(alterations))
+
+
+def _ensure_product_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'products' not in tables:
+        return
+    existing = {c['name'] for c in inspector.get_columns('products')}
+    if 'cost_price' not in existing:
+        with db.engine.begin() as conn:
+            conn.execute(text('ALTER TABLE products ADD COLUMN cost_price NUMERIC(10, 2)'))
+        app.logger.info('Added cost_price column to products')
 
 
 def _ensure_before_after_columns(app):
@@ -97,6 +111,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         _ensure_order_item_columns(app)
+        _ensure_product_columns(app)
         _ensure_before_after_columns(app)
 
     uploads_root = Path(app.config['UPLOAD_FOLDER'])
