@@ -1,4 +1,6 @@
 from copy import deepcopy
+import json
+import re
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
@@ -7,6 +9,17 @@ from auth_utils import current_user_role
 from models.models import SiteSetting, db
 
 site_settings_bp = Blueprint('site_settings', __name__)
+
+# Validation constants for category showcase
+ALLOWED_ICON_KEYS = {
+    'FaBoxOpen', 'FaCouch', 'FaCube', 'FaHome', 'FaLayerGroup',
+    'FaPalette', 'FaPrint', 'FaVrCardboard'
+}
+MAX_CATEGORIES = 50
+MAX_PAYLOAD_SIZE_KB = 50
+MAX_TITLE_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 1000
+SLUG_PATTERN = re.compile(r'^[a-z0-9\-]{3,64}$')
 
 DEFAULT_LANDING_IMAGES = {
     'hero': 'https://images.unsplash.com/photo-1618219908412-a29a1bb7b86e?w=1800&q=85',
@@ -134,14 +147,24 @@ def _merge_category_showcase(value):
 
     incoming_categories = value.get('categories')
     if isinstance(incoming_categories, list):
+        if len(incoming_categories) > MAX_CATEGORIES:
+            return merged
+            
         default_map = {_normalize_slug(item.get('slug')): item for item in merged['categories']}
         normalized = []
+        seen_slugs = set()
+        
         for index, item in enumerate(incoming_categories):
             if not isinstance(item, dict):
                 continue
             slug = _normalize_slug(item.get('slug'))
-            if not slug:
+            
+            # Validate slug format and uniqueness
+            if not slug or not SLUG_PATTERN.match(slug):
                 continue
+            if slug in seen_slugs:
+                continue
+            seen_slugs.add(slug)
 
             base = deepcopy(default_map.get(slug, {
                 'slug': slug,
@@ -152,17 +175,40 @@ def _merge_category_showcase(value):
                 'enabled': True,
                 'featuredOrder': index + 1,
             }))
-            for key in ('title', 'description', 'iconKey', 'bannerUrl'):
-                incoming = item.get(key)
-                if isinstance(incoming, str):
-                    base[key] = incoming.strip()
+            
+            # Validate and update title
+            title = item.get('title')
+            if isinstance(title, str):
+                title = title.strip()[:MAX_TITLE_LENGTH]
+                if title:
+                    base['title'] = title
+            
+            # Validate and update description
+            description = item.get('description')
+            if isinstance(description, str):
+                description = description.strip()[:MAX_DESCRIPTION_LENGTH]
+                if description or 'description' in item:
+                    base['description'] = description
+            
+            # Validate and update iconKey
+            icon_key = item.get('iconKey')
+            if isinstance(icon_key, str) and icon_key in ALLOWED_ICON_KEYS:
+                base['iconKey'] = icon_key
+            
+            # Validate and update bannerUrl
+            banner_url = item.get('bannerUrl')
+            if isinstance(banner_url, str):
+                banner_url = banner_url.strip()
+                base['bannerUrl'] = banner_url
 
+            # Validate and update enabled flag
             enabled = item.get('enabled')
             if isinstance(enabled, bool):
                 base['enabled'] = enabled
 
+            # Validate and update featuredOrder
             featured_order = item.get('featuredOrder')
-            if isinstance(featured_order, int):
+            if isinstance(featured_order, int) and featured_order > 0:
                 base['featuredOrder'] = featured_order
             else:
                 base['featuredOrder'] = index + 1
@@ -182,6 +228,47 @@ def _get_category_showcase():
     if not setting:
         return deepcopy(DEFAULT_CATEGORY_SHOWCASE)
     return _merge_category_showcase(setting.value)
+
+
+def _validate_category_showcase_payload(data):
+    """Validate incoming category showcase payload. Returns error tuple or None if valid."""
+    if not isinstance(data, dict):
+        return None
+    
+    # Check payload size
+    payload_size_kb = len(json.dumps(data).encode('utf-8')) / 1024
+    if payload_size_kb > MAX_PAYLOAD_SIZE_KB:
+        return (jsonify({'message': f'Payload too large (max {MAX_PAYLOAD_SIZE_KB}KB)'}), 413)
+    
+    # Check category count
+    categories = data.get('categories', [])
+    if not isinstance(categories, list):
+        return None
+    if len(categories) > MAX_CATEGORIES:
+        return (jsonify({'message': f'Too many categories (max {MAX_CATEGORIES})'}), 400)
+    
+    # Validate individual categories
+    seen_slugs = set()
+    for idx, category in enumerate(categories):
+        if not isinstance(category, dict):
+            continue
+        
+        slug = _normalize_slug(category.get('slug', ''))
+        if slug and slug in seen_slugs:
+            return (jsonify({'message': f'Duplicate slug: {slug}'}), 400)
+        if slug:
+            seen_slugs.add(slug)
+        
+        # Validate icon key if provided
+        icon_key = category.get('iconKey')
+        if icon_key and isinstance(icon_key, str) and icon_key not in ALLOWED_ICON_KEYS:
+            return (jsonify({'message': f'Invalid icon key: {icon_key}. Allowed: {sorted(ALLOWED_ICON_KEYS)}'}), 400)
+        
+        # Validate slug format if provided
+        if slug and not SLUG_PATTERN.match(slug):
+            return (jsonify({'message': f'Invalid slug format: {slug}. Must be 3-64 chars, lowercase alphanumeric and dashes'}), 400)
+    
+    return None
 
 
 @site_settings_bp.get('/site-settings/landing-images')
@@ -223,6 +310,12 @@ def update_category_showcase():
         return err
 
     data = request.get_json(silent=True) or {}
+    
+    # Validate payload before merging
+    validation_error = _validate_category_showcase_payload(data)
+    if validation_error:
+        return validation_error
+    
     merged = _merge_category_showcase(data)
 
     setting = SiteSetting.query.filter_by(key='category_showcase').first()
