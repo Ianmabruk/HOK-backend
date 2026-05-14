@@ -29,7 +29,7 @@ def get_products():
     search = request.args.get('search')
     sort = request.args.get('sort', '')
     page = int(request.args.get('page', 1))
-    limit = int(request.args.get('limit', 12))
+    limit = min(int(request.args.get('limit', 12)), 200)
     price_min = request.args.get('price_min', 0, type=float)
     price_max = request.args.get('price_max', 1e9, type=float)
 

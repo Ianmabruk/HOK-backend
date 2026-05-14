@@ -104,7 +104,10 @@ class Config:
     JWT_SECRET_KEY = (os.getenv('JWT_SECRET_KEY') or os.getenv('SECRET_KEY') or 'dev-secret-change-me').strip()
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
     BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', '').strip()
-    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', str(Path(__file__).resolve().parent.parent / 'uploads'))
+    UPLOAD_FOLDER = os.getenv(
+        'UPLOAD_FOLDER',
+        '/tmp/hok-uploads' if _is_production() else str(Path(__file__).resolve().parent.parent / 'uploads'),
+    )
     APP_ENV = (os.getenv('APP_ENV') or os.getenv('FLASK_ENV') or 'development').strip().lower()
 
     ADMIN_NAME = os.getenv('ADMIN_NAME', 'Admin').strip() or 'Admin'
