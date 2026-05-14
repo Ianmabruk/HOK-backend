@@ -13,10 +13,11 @@ POST   /api/reset-password         – apply new password via token
 
 import logging
 import secrets
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 
 import bcrypt
-from sqlalchemy import func
+from sqlalchemy import func, text
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     jwt_required,
@@ -86,10 +87,42 @@ def _get_user_by_email(email: str):
     normalized = _normalize_email(email)
     if not normalized:
         return None
-    exact = User.query.filter_by(email=normalized).first()
-    if exact:
-        return exact
-    return User.query.filter(func.lower(User.email) == normalized).first()
+
+    # Preferred path: ORM query on the full User model.
+    # On legacy DB schemas missing recently added columns, this may fail.
+    try:
+        exact = User.query.filter_by(email=normalized).first()
+        if exact:
+            return exact
+        return User.query.filter(func.lower(User.email) == normalized).first()
+    except Exception:
+        logger.warning("Falling back to raw user lookup due to ORM schema mismatch")
+
+    row = db.session.execute(
+        text(
+            """
+            SELECT id, name, email, password, role, email_verified, created_at
+            FROM users
+            WHERE lower(email) = :email
+            LIMIT 1
+            """
+        ),
+        {'email': normalized},
+    ).mappings().first()
+    if not row:
+        return None
+
+    return SimpleNamespace(
+        id=row['id'],
+        name=row['name'],
+        email=row['email'],
+        password=row['password'],
+        role=row['role'],
+        email_verified=row['email_verified'],
+        created_at=row.get('created_at'),
+        last_login_at=None,
+        last_login_ip=None,
+    )
 
 
 def _bcrypt_rounds() -> int:
@@ -106,7 +139,29 @@ def _configured_admin_name() -> str:
 
 
 def _admin_exists() -> bool:
-    return User.query.filter_by(role="admin").first() is not None
+    try:
+        return User.query.filter_by(role="admin").first() is not None
+    except Exception:
+        row = db.session.execute(
+            text("SELECT 1 FROM users WHERE lower(role) = 'admin' LIMIT 1")
+        ).first()
+        return row is not None
+
+
+def _user_payload(user):
+    if hasattr(user, 'to_dict'):
+        return user.to_dict()
+    created_at = getattr(user, 'created_at', None)
+    last_login_at = getattr(user, 'last_login_at', None)
+    return {
+        'id': getattr(user, 'id', None),
+        'name': getattr(user, 'name', None),
+        'email': getattr(user, 'email', None),
+        'role': getattr(user, 'role', None),
+        'email_verified': getattr(user, 'email_verified', False),
+        'last_login_at': last_login_at.isoformat() if last_login_at else None,
+        'created_at': created_at.isoformat() if created_at else None,
+    }
 
 
 # ─── POST /register ───────────────────────────────────────────────────────────
@@ -187,14 +242,25 @@ def login():
             return jsonify({"message": "Invalid email or password"}), 401
 
         client_ip = _client_ip()
+        prev_ip = getattr(user, 'last_login_ip', None)
         try:
-            prev_ip = user.last_login_ip
-            user.last_login_at = datetime.utcnow()
-            if prev_ip != client_ip:
-                user.last_login_ip = client_ip
+            if isinstance(user, User):
+                user.last_login_at = datetime.utcnow()
+                if prev_ip != client_ip:
+                    user.last_login_ip = client_ip
+            else:
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE users
+                        SET last_login_at = :ts, last_login_ip = :ip
+                        WHERE id = :uid
+                        """
+                    ),
+                    {'ts': datetime.utcnow(), 'ip': client_ip, 'uid': user.id},
+                )
         except Exception:
-            prev_ip = None
-            logger.warning('Could not read/write last_login columns — columns may be missing')
+            logger.warning('Could not write last_login metadata — continuing login flow')
         db.session.commit()
 
         frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
@@ -212,7 +278,7 @@ def login():
             logger.info("[auth] Login notice sent to %s", user.email)
 
         jwt_token = create_user_access_token(user)
-        return jsonify({"user": user.to_dict(), "token": jwt_token}), 200
+        return jsonify({"user": _user_payload(user), "token": jwt_token}), 200
 
     except Exception:
         db.session.rollback()
