@@ -96,6 +96,7 @@ def _get_user_by_email(email: str):
             return exact
         return User.query.filter(func.lower(User.email) == normalized).first()
     except Exception:
+        db.session.rollback()
         logger.warning("Falling back to raw user lookup due to ORM schema mismatch")
 
     row = db.session.execute(
@@ -142,6 +143,7 @@ def _admin_exists() -> bool:
     try:
         return User.query.filter_by(role="admin").first() is not None
     except Exception:
+        db.session.rollback()
         row = db.session.execute(
             text("SELECT 1 FROM users WHERE lower(role) = 'admin' LIMIT 1")
         ).first()
