@@ -95,7 +95,9 @@ def _ensure_user_columns(app):
     existing = {c['name'] for c in inspector.get_columns('users')}
     alterations = []
     if 'last_login_at' not in existing:
-        alterations.append('ALTER TABLE users ADD COLUMN last_login_at DATETIME')
+        alterations.append('ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP')
+    if 'last_login_ip' not in existing:
+        alterations.append('ALTER TABLE users ADD COLUMN last_login_ip VARCHAR(45)')
     if not alterations:
         return
     with db.engine.begin() as conn:
