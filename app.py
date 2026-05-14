@@ -87,6 +87,40 @@ def _ensure_before_after_columns(app):
         app.logger.info('Added is_published column to before_after_projects')
 
 
+def _ensure_user_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'users' not in tables:
+        return
+    existing = {c['name'] for c in inspector.get_columns('users')}
+    alterations = []
+    if 'last_login_at' not in existing:
+        alterations.append('ALTER TABLE users ADD COLUMN last_login_at DATETIME')
+    if not alterations:
+        return
+    with db.engine.begin() as conn:
+        for statement in alterations:
+            conn.execute(text(statement))
+    app.logger.info('Applied lightweight users schema updates: %s', ', '.join(alterations))
+
+
+def _ensure_portfolio_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'portfolio_projects' not in tables:
+        return
+    existing = {c['name'] for c in inspector.get_columns('portfolio_projects')}
+    alterations = []
+    if 'video_url' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN video_url TEXT')
+    if not alterations:
+        return
+    with db.engine.begin() as conn:
+        for statement in alterations:
+            conn.execute(text(statement))
+    app.logger.info('Applied lightweight portfolio schema updates: %s', ', '.join(alterations))
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -113,10 +147,15 @@ def create_app():
     register_socket_events(socketio)
 
     with app.app_context():
-        db.create_all()
-        _ensure_order_item_columns(app)
-        _ensure_product_columns(app)
-        _ensure_before_after_columns(app)
+        try:
+            db.create_all()
+            _ensure_user_columns(app)
+            _ensure_portfolio_columns(app)
+            _ensure_order_item_columns(app)
+            _ensure_product_columns(app)
+            _ensure_before_after_columns(app)
+        except Exception:
+            app.logger.exception('Database initialization (create_all + lightweight schema updates) failed; continuing without schema sync.')
 
     uploads_root = Path(app.config['UPLOAD_FOLDER'])
     uploads_root.mkdir(parents=True, exist_ok=True)
@@ -129,6 +168,29 @@ def create_app():
     def email_health():
         payload = sendgrid_health_payload()
         return jsonify(payload), 200
+
+    @app.get('/api/health')
+    def app_health():
+        db_ok = True
+        db_error = None
+        try:
+            db.session.execute(text('SELECT 1'))
+        except Exception as exc:
+            db_ok = False
+            db_error = str(exc)
+
+        payload = {
+            'status': 'ok' if db_ok else 'degraded',
+            'environment': app.config.get('APP_ENV', 'development'),
+            'checks': {
+                'database': {
+                    'ok': db_ok,
+                    'driver': app.config.get('SQLALCHEMY_DATABASE_URI', '').split(':', 1)[0],
+                    'error': db_error,
+                },
+            },
+        }
+        return jsonify(payload), (200 if payload['status'] == 'ok' else 503)
 
     # ── JSON error handlers (must be inside create_app so they bind to this app) ──
     @app.errorhandler(HTTPException)
