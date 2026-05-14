@@ -97,6 +97,22 @@ def email_users():
     }), 200
 
 
+@users_bp.delete('/users/<int:uid>')
+@jwt_required()
+def delete_user(uid):
+    err = _admin_only()
+    if err:
+        return err
+    if uid == current_user_id():
+        return jsonify({'message': 'Cannot delete your own account'}), 400
+    user = db.session.get(User, uid)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': 'User deleted'}), 200
+
+
 @users_bp.get('/users/email/logs')
 @jwt_required()
 def get_email_logs():

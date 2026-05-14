@@ -51,6 +51,7 @@ def create_project():
         summary=(data.get('summary') or '').strip() or None,
         description=(data.get('description') or '').strip() or None,
         image_url=(data.get('image_url') or '').strip() or None,
+        video_url=(data.get('video_url') or '').strip() or None,
         room_type=(data.get('room_type') or '').strip() or None,
         style=(data.get('style') or '').strip() or None,
         year=(data.get('year') or '').strip() or None,
@@ -72,7 +73,7 @@ def update_project(pid):
     if not p:
         return jsonify({'message': 'Project not found'}), 404
     data = request.get_json(silent=True) or {}
-    for field in ('title', 'summary', 'description', 'image_url', 'room_type', 'style', 'year', 'location'):
+    for field in ('title', 'summary', 'description', 'image_url', 'video_url', 'room_type', 'style', 'year', 'location'):
         if field in data:
             p.__setattr__(field, (data[field] or '').strip() or None)
     if 'sort_order' in data:

@@ -23,6 +23,35 @@ def _is_truthy(value: str | None) -> bool:
     return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def _first_env(*names: str, default: str = '') -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return default
+
+
+def _parse_size_bytes(value: str | None, default: int) -> int:
+    text = str(value or '').strip().lower()
+    if not text:
+        return default
+    multipliers = {
+        'kb': 1024,
+        'k': 1024,
+        'mb': 1024 * 1024,
+        'm': 1024 * 1024,
+        'gb': 1024 * 1024 * 1024,
+        'g': 1024 * 1024 * 1024,
+    }
+    for suffix, multiplier in multipliers.items():
+        if text.endswith(suffix):
+            return int(float(text[:-len(suffix)].strip()) * multiplier)
+    try:
+        return int(text)
+    except ValueError:
+        return default
+
+
 def _is_production() -> bool:
     env = (os.getenv('APP_ENV') or os.getenv('FLASK_ENV') or '').strip().lower()
     if env:
@@ -83,14 +112,14 @@ def _validate_production_runtime(database_uri: str) -> None:
             'only if you have mounted persistent disk storage.'
         )
 
-    jwt_secret = (os.getenv('JWT_SECRET_KEY') or os.getenv('SECRET_KEY') or '').strip()
+    jwt_secret = _first_env('JWT_SECRET_KEY', 'JWT_SECRET', 'SECRET_KEY')
     if not jwt_secret or jwt_secret in {
         'dev-secret-change-me',
         'change-this-super-secret-key-in-production',
         'generate-random-32-character-string',
         'generate-strong-random-string-in-production',
     }:
-        raise RuntimeError('JWT_SECRET_KEY must be set to a strong value in production.')
+        raise RuntimeError('JWT_SECRET_KEY or JWT_SECRET must be set to a strong value in production.')
 
 
 _RESOLVED_DATABASE_URI = _database_uri()
@@ -101,13 +130,18 @@ _IS_SQLITE_DATABASE = _RESOLVED_DATABASE_URI.startswith('sqlite:')
 class Config:
     SQLALCHEMY_DATABASE_URI = _RESOLVED_DATABASE_URI
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = (os.getenv('JWT_SECRET_KEY') or os.getenv('SECRET_KEY') or 'dev-secret-change-me').strip()
+    JWT_SECRET_KEY = _first_env('JWT_SECRET_KEY', 'JWT_SECRET', 'SECRET_KEY', default='dev-secret-change-me')
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
     BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', '').strip()
+    SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip()
+    SUPABASE_SERVICE_ROLE_KEY = _first_env('SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_KEY')
+    SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY', '').strip()
+    SUPABASE_MEDIA_BUCKET = os.getenv('SUPABASE_MEDIA_BUCKET', 'media').strip() or 'media'
     UPLOAD_FOLDER = os.getenv(
         'UPLOAD_FOLDER',
         '/tmp/hok-uploads' if _is_production() else str(Path(__file__).resolve().parent.parent / 'uploads'),
     )
+    MAX_CONTENT_LENGTH = _parse_size_bytes(os.getenv('MAX_UPLOAD_SIZE'), 120 * 1024 * 1024)
     APP_ENV = (os.getenv('APP_ENV') or os.getenv('FLASK_ENV') or 'development').strip().lower()
 
     ADMIN_NAME = os.getenv('ADMIN_NAME', 'Admin').strip() or 'Admin'

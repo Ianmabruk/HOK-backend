@@ -126,6 +126,7 @@ def _ensure_portfolio_columns(app):
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    app.config['MAX_CONTENT_LENGTH'] = app.config.get('MAX_CONTENT_LENGTH') or 120 * 1024 * 1024
 
     allowed_origins = _allowed_origins(app)
 
@@ -217,4 +218,5 @@ if __name__ == '__main__':
     # FLASK_DEBUG=1 enables Werkzeug reloader; keep it off by default so that
     # unhandled exceptions return JSON (not the HTML interactive debugger).
     debug = os.getenv('FLASK_DEBUG', '0') == '1'
-    socketio.run(app, debug=debug, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    port = int(os.getenv('PORT', '5000'))
+    socketio.run(app, debug=debug, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)

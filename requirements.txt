@@ -12,3 +12,4 @@ sendgrid
 python-jose[cryptography]
 passlib[bcrypt]
 cloudinary
+supabase

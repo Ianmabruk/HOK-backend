@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 import logging
 import os
 from pathlib import Path
@@ -10,9 +11,13 @@ from flask import current_app, has_request_context, request
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
+from services import get_admin_client
+
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
-VIDEO_EXTENSIONS = {'.mp4', '.webm', '.mov', '.m4v'}
+VIDEO_EXTENSIONS = {'.mp4', '.webm', '.mov', '.m4v', '.mkv'}
+IMAGE_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+VIDEO_MIME_TYPES = {'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'video/x-m4v'}
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +72,10 @@ def _allowed_extensions(kind: str) -> set[str]:
     return IMAGE_EXTENSIONS if kind == 'image' else VIDEO_EXTENSIONS
 
 
+def _allowed_mime_types(kind: str) -> set[str]:
+    return IMAGE_MIME_TYPES if kind == 'image' else VIDEO_MIME_TYPES
+
+
 def _validate_file(file: FileStorage, kind: str) -> str:
     filename = secure_filename(file.filename or '')
     if not filename:
@@ -76,11 +85,55 @@ def _validate_file(file: FileStorage, kind: str) -> str:
     if extension not in _allowed_extensions(kind):
         raise ValueError(f'Unsupported {kind} file type')
 
+    mime_type = (file.mimetype or mimetypes.guess_type(filename)[0] or '').split(';', 1)[0].strip().lower()
+    if mime_type and mime_type != 'application/octet-stream' and mime_type not in _allowed_mime_types(kind):
+        raise ValueError(f'Unsupported {kind} MIME type')
+
     return extension
+
+
+def _supabase_media_url(bucket: str, path: str) -> str:
+    base = (current_app.config.get('SUPABASE_URL') or '').strip().rstrip('/')
+    return f'{base}/storage/v1/object/public/{bucket}/{path}'
+
+
+def _upload_to_supabase_storage(file: FileStorage, kind: str, extension: str) -> dict[str, str] | None:
+    client = get_admin_client()
+    if client is None:
+        return None
+
+    bucket = (current_app.config.get('SUPABASE_MEDIA_BUCKET') or 'media').strip() or 'media'
+    filename = f'{kind}-{uuid4().hex}{extension}'
+    object_path = f'{kind}s/{filename}'
+
+    file.stream.seek(0)
+    client.storage.from_(bucket).upload(
+        object_path,
+        file.stream,
+        {
+            'content-type': file.mimetype or mimetypes.guess_type(file.filename or '')[0] or 'application/octet-stream',
+            'cache-control': '3600',
+            'x-upsert': 'true',
+        },
+    )
+
+    return {
+        'url': _supabase_media_url(bucket, object_path),
+        'provider': 'supabase',
+        'public_id': object_path,
+    }
 
 
 def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
     extension = _validate_file(file, kind)
+
+    try:
+        uploaded = _upload_to_supabase_storage(file, kind, extension)
+        if uploaded:
+            return uploaded
+    except Exception as exc:
+        logger.warning('Supabase Storage upload failed for %s; falling back to local storage: %s', kind, exc)
+        file.stream.seek(0)
 
     if _is_cloudinary_enabled():
         try:
@@ -101,6 +154,7 @@ def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
             return {
                 'url': uploaded['secure_url'],
                 'provider': 'cloudinary',
+                'public_id': uploaded.get('public_id'),
             }
         except Exception as exc:
             logger.warning('Cloudinary upload failed for %s; falling back to local storage: %s', kind, exc)
@@ -115,4 +169,5 @@ def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
     return {
         'url': _local_media_url(str(relative_dir / filename).replace(os.sep, '/')),
         'provider': 'local',
+        'public_id': None,
     }

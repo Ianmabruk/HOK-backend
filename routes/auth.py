@@ -32,7 +32,7 @@ from services.email_service import (
     send_verify_email,
     send_welcome_email,
 )
-from services.supabase_admin import update_user_login_metadata
+from services import update_user_login_metadata
 
 auth_bp = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)

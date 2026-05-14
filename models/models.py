@@ -13,6 +13,7 @@ class User(db.Model):
     role = db.Column(db.String(20), default='customer')
     email_verified = db.Column(db.Boolean, default=False, nullable=False)
     last_login_ip = db.Column(db.String(45))          # max 45 chars covers IPv6
+    last_login_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -22,6 +23,8 @@ class User(db.Model):
             'email': self.email,
             'role': self.role,
             'email_verified': self.email_verified,
+            'last_login_ip': self.last_login_ip,
+            'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
             'created_at': self.created_at.isoformat(),
         }
 
@@ -211,6 +214,7 @@ class PortfolioProject(db.Model):
     summary = db.Column(db.String(400))
     description = db.Column(db.Text)
     image_url = db.Column(db.Text)
+    video_url = db.Column(db.Text)
     room_type = db.Column(db.String(80))
     style = db.Column(db.String(80))
     year = db.Column(db.String(10))
@@ -226,6 +230,7 @@ class PortfolioProject(db.Model):
             'summary': self.summary,
             'description': self.description,
             'image_url': self.image_url,
+            'video_url': self.video_url,
             'room_type': self.room_type,
             'style': self.style,
             'year': self.year,

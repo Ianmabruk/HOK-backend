@@ -244,6 +244,7 @@ def _order_confirmation_body(
             '</tr>'
         )
 
+    empty_line_items_row = '<tr><td colspan="3" style="padding:10px 0;color:#5a5050;">No line items were recorded.</td></tr>'
     items_table = (
         '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
         'style="border-collapse:collapse;margin:8px 0 4px;">'
@@ -255,7 +256,7 @@ def _order_confirmation_body(
         '</tr>'
         '</thead>'
         '<tbody>'
-        f"{''.join(lines) if lines else '<tr><td colspan=\"3\" style=\"padding:10px 0;color:#5a5050;\">No line items were recorded.</td></tr>'}"
+        f"{''.join(lines) if lines else empty_line_items_row}"
         '</tbody>'
         '</table>'
     )
