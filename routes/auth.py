@@ -32,6 +32,7 @@ from services.email_service import (
     send_verify_email,
     send_welcome_email,
 )
+from services.supabase_admin import update_user_login_metadata
 
 auth_bp = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
@@ -99,17 +100,22 @@ def _get_user_by_email(email: str):
         db.session.rollback()
         logger.warning("Falling back to raw user lookup due to ORM schema mismatch")
 
-    row = db.session.execute(
-        text(
-            """
-            SELECT id, name, email, password, role, email_verified, created_at
-            FROM users
-            WHERE lower(email) = :email
-            LIMIT 1
-            """
-        ),
-        {'email': normalized},
-    ).mappings().first()
+    try:
+        row = db.session.execute(
+            text(
+                """
+                SELECT id, name, email, password, role, email_verified
+                FROM users
+                WHERE lower(email) = :email
+                LIMIT 1
+                """
+            ),
+            {'email': normalized},
+        ).mappings().first()
+    except Exception:
+        db.session.rollback()
+        logger.exception("Raw user lookup failed for email=%s", normalized)
+        return None
     if not row:
         return None
 
@@ -120,10 +126,28 @@ def _get_user_by_email(email: str):
         password=row['password'],
         role=row['role'],
         email_verified=row['email_verified'],
-        created_at=row.get('created_at'),
+        created_at=None,
         last_login_at=None,
         last_login_ip=None,
     )
+
+
+def _password_matches(user, plain_password: str) -> bool:
+    stored = getattr(user, 'password', None)
+    if not isinstance(stored, str) or not stored:
+        return False
+    try:
+        return bcrypt.checkpw(plain_password.encode(), stored.encode())
+    except Exception:
+        logger.warning("Password hash check failed for user_id=%s", getattr(user, 'id', None))
+        return False
+
+
+def _serialize_dt(value):
+    if value is None:
+        return None
+    iso = getattr(value, 'isoformat', None)
+    return iso() if callable(iso) else str(value)
 
 
 def _bcrypt_rounds() -> int:
@@ -161,8 +185,9 @@ def _user_payload(user):
         'email': getattr(user, 'email', None),
         'role': getattr(user, 'role', None),
         'email_verified': getattr(user, 'email_verified', False),
-        'last_login_at': last_login_at.isoformat() if last_login_at else None,
-        'created_at': created_at.isoformat() if created_at else None,
+        'last_login_ip': getattr(user, 'last_login_ip', None),
+        'last_login_at': _serialize_dt(last_login_at),
+        'created_at': _serialize_dt(created_at),
     }
 
 
@@ -240,44 +265,53 @@ def login():
 
     try:
         user = _get_user_by_email(data["email"])
-        if not user or not bcrypt.checkpw(data["password"].encode(), user.password.encode()):
+        if not user or not _password_matches(user, data["password"]):
             return jsonify({"message": "Invalid email or password"}), 401
 
         client_ip = _client_ip()
         prev_ip = getattr(user, 'last_login_ip', None)
+        login_time = datetime.utcnow()
         try:
-            if isinstance(user, User):
-                user.last_login_at = datetime.utcnow()
-                if prev_ip != client_ip:
+            if not update_user_login_metadata(user.id, login_time, client_ip):
+                if isinstance(user, User):
+                    user.last_login_at = login_time
                     user.last_login_ip = client_ip
-            else:
-                db.session.execute(
-                    text(
-                        """
-                        UPDATE users
-                        SET last_login_at = :ts, last_login_ip = :ip
-                        WHERE id = :uid
-                        """
-                    ),
-                    {'ts': datetime.utcnow(), 'ip': client_ip, 'uid': user.id},
-                )
+                    db.session.commit()
+                else:
+                    db.session.execute(
+                        text(
+                            """
+                            UPDATE users
+                            SET last_login_at = :ts, last_login_ip = :ip
+                            WHERE id = :uid
+                            """
+                        ),
+                        {'ts': login_time, 'ip': client_ip, 'uid': user.id},
+                    )
+                    db.session.commit()
+            elif isinstance(user, User):
+                user.last_login_at = login_time
+                user.last_login_ip = client_ip
         except Exception:
+            db.session.rollback()
             logger.warning('Could not write last_login metadata — continuing login flow')
-        db.session.commit()
 
         frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
         change_url = f"{frontend_url}/forgot-password"
-        time_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        time_str = login_time.strftime("%Y-%m-%d %H:%M UTC")
         if prev_ip and prev_ip != client_ip:
-            send_login_notice(
-                user.email,
-                user.name,
-                client_ip,
-                time_str,
-                change_url,
-                is_new_location=True,
-            )
-            logger.info("[auth] Login notice sent to %s", user.email)
+            try:
+                send_login_notice(
+                    user.email,
+                    user.name,
+                    client_ip,
+                    time_str,
+                    change_url,
+                    is_new_location=True,
+                )
+                logger.info("[auth] Login notice sent to %s", user.email)
+            except Exception:
+                logger.warning('Login notice failed for %s — continuing login flow', user.email, exc_info=True)
 
         jwt_token = create_user_access_token(user)
         return jsonify({"user": _user_payload(user), "token": jwt_token}), 200
