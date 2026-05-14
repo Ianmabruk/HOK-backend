@@ -83,8 +83,13 @@ def _validate_production_runtime(database_uri: str) -> None:
             'only if you have mounted persistent disk storage.'
         )
 
-    jwt_secret = os.getenv('JWT_SECRET_KEY', '').strip()
-    if not jwt_secret or jwt_secret == 'dev-secret-change-me':
+    jwt_secret = (os.getenv('JWT_SECRET_KEY') or os.getenv('SECRET_KEY') or '').strip()
+    if not jwt_secret or jwt_secret in {
+        'dev-secret-change-me',
+        'change-this-super-secret-key-in-production',
+        'generate-random-32-character-string',
+        'generate-strong-random-string-in-production',
+    }:
         raise RuntimeError('JWT_SECRET_KEY must be set to a strong value in production.')
 
 
@@ -96,7 +101,7 @@ _IS_SQLITE_DATABASE = _RESOLVED_DATABASE_URI.startswith('sqlite:')
 class Config:
     SQLALCHEMY_DATABASE_URI = _RESOLVED_DATABASE_URI
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-change-me')
+    JWT_SECRET_KEY = (os.getenv('JWT_SECRET_KEY') or os.getenv('SECRET_KEY') or 'dev-secret-change-me').strip()
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
     BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', '').strip()
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', str(Path(__file__).resolve().parent.parent / 'uploads'))
