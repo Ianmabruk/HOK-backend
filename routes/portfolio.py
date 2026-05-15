@@ -8,6 +8,7 @@ PUT    /api/portfolio/<id>     - update project (admin)
 DELETE /api/portfolio/<id>     - delete project (admin)
 """
 import logging
+import uuid
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
@@ -19,6 +20,14 @@ portfolio_bp = Blueprint('portfolio', __name__)
 logger = logging.getLogger(__name__)
 
 
+def _request_error_context() -> str:
+    request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
+    return (
+        f"request_id={request_id} method={request.method} path={request.path} "
+        f"remote_addr={request.remote_addr}"
+    )
+
+
 @portfolio_bp.get('/portfolio')
 def list_projects():
     try:
@@ -28,7 +37,7 @@ def list_projects():
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
         db.session.rollback()
-        logger.exception('Failed to load published portfolio projects; returning empty list')
+        logger.exception('Failed to load published portfolio projects; returning empty list | %s', _request_error_context())
         return jsonify([]), 200
 
 
@@ -44,7 +53,7 @@ def list_all_projects():
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
         db.session.rollback()
-        logger.exception('Failed to load all portfolio projects; returning empty list')
+        logger.exception('Failed to load all portfolio projects; returning empty list | %s', _request_error_context())
         return jsonify([]), 200
 
 

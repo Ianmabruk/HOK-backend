@@ -1,6 +1,7 @@
 import os
+import uuid
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO
@@ -229,8 +230,19 @@ def create_app():
     def handle_exception(e):
         """Catch-all for unhandled exceptions — return JSON 500 instead
         of the Werkzeug HTML debugger page."""
-        app.logger.exception("Unhandled server error: %s", e)
-        return jsonify({"message": "An internal server error occurred. Please try again."}), 500
+        error_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
+        app.logger.exception(
+            "Unhandled server error id=%s method=%s path=%s remote_addr=%s error=%s",
+            error_id,
+            request.method,
+            request.path,
+            request.remote_addr,
+            e,
+        )
+        return jsonify({
+            "message": "An internal server error occurred. Please try again.",
+            "error_id": error_id,
+        }), 500
 
     return app
 

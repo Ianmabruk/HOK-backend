@@ -13,6 +13,14 @@ orders_bp = Blueprint('orders', __name__)
 logger = logging.getLogger(__name__)
 
 
+def _request_error_context() -> str:
+    request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
+    return (
+        f"request_id={request_id} method={request.method} path={request.path} "
+        f"remote_addr={request.remote_addr}"
+    )
+
+
 def _safe_uuid(value):
     try:
         return uuid.UUID(str(value))
@@ -195,7 +203,7 @@ def get_orders():
         return jsonify(payload), 200
     except Exception:
         db.session.rollback()
-        logger.exception('Failed to list orders; returning empty list')
+        logger.exception('Failed to list orders; returning empty list | %s', _request_error_context())
         return jsonify([]), 200
 
 
