@@ -266,6 +266,31 @@ def register():
             }
             if 'email_verified' in columns:
                 insert_values['email_verified'] = email_verified
+
+            try:
+                column_defs = inspect(db.engine).get_columns('users')
+            except Exception:
+                column_defs = []
+
+            for column in column_defs:
+                column_name = column.get('name')
+                if not column_name or column_name in insert_values or column_name == 'id':
+                    continue
+                if column.get('nullable', True):
+                    continue
+                if column.get('default') is not None:
+                    continue
+
+                type_name = str(column.get('type') or '').lower()
+                if 'bool' in type_name:
+                    insert_values[column_name] = False
+                elif any(token in type_name for token in ('int', 'numeric', 'decimal', 'float', 'double')):
+                    insert_values[column_name] = 0
+                elif 'date' in type_name or 'time' in type_name:
+                    insert_values[column_name] = datetime.utcnow()
+                else:
+                    insert_values[column_name] = ''
+
             sql_cols = ', '.join(insert_values.keys())
             sql_params = ', '.join(f':{key}' for key in insert_values)
             db.session.execute(text(f'INSERT INTO users ({sql_cols}) VALUES ({sql_params})'), insert_values)
