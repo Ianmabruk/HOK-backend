@@ -42,6 +42,15 @@ def _clean_text(value):
     return str(value or '').strip() or None
 
 
+def _normalize_vendor_id(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return value
+
+
 def _normalize_category(value):
     normalized = (value or '').strip().lower().replace('_', '-')
     normalized = re.sub(r'\s+', '-', normalized)
@@ -127,9 +136,7 @@ def create_product():
         return jsonify({'error': 'Invalid input', 'field': 'stock', 'message': 'Stock cannot be negative'}), 400
 
     cost_price = _safe_float(data.get('cost_price'))
-    vendor_id = _safe_int(data.get('vendor_id'), None)
-    if data.get('vendor_id') not in (None, '') and vendor_id is None:
-        return jsonify({'error': 'Invalid input', 'field': 'vendor_id', 'message': 'vendor_id must be a valid integer'}), 400
+    vendor_id = _normalize_vendor_id(data.get('vendor_id'))
 
     try:
         p = Product(
@@ -193,10 +200,7 @@ def update_product(pid):
         p.stock = stock
 
     if 'vendor_id' in data:
-        vendor_id = _safe_int(data.get('vendor_id'), None)
-        if data.get('vendor_id') not in (None, '') and vendor_id is None:
-            return jsonify({'error': 'Invalid input', 'field': 'vendor_id', 'message': 'vendor_id must be a valid integer'}), 400
-        p.vendor_id = vendor_id
+        p.vendor_id = _normalize_vendor_id(data.get('vendor_id'))
 
     if 'category' in data:
         p.category = _normalize_category(data.get('category')) or None
