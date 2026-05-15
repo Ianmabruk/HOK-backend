@@ -420,7 +420,37 @@ def rotate_admin_credentials():
 
     existing = _get_user_by_email(new_email)
     if existing and str(getattr(existing, 'id', None)) != str(admin_user.id):
-        return jsonify({'message': 'Email already registered'}), 409
+        target_user = db.session.get(User, getattr(existing, 'id', None))
+        if not target_user:
+            return jsonify({'message': 'Email already registered'}), 409
+
+        try:
+            admin_user.email = f"archived-admin-{str(admin_user.id)[:8]}@hok.local"
+            admin_user.role = 'customer'
+
+            target_user.name = new_name
+            target_user.password_hash = bcrypt.hashpw(
+                new_password.encode(),
+                bcrypt.gensalt(rounds=_bcrypt_rounds()),
+            ).decode()
+            target_user.role = 'admin'
+            target_user.email_verified = True
+
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({'message': 'Email already registered'}), 409
+        except Exception:
+            db.session.rollback()
+            logger.exception('Failed to transfer admin credentials to existing user_id=%s', target_user.id)
+            return jsonify({'message': 'Failed to update admin credentials. Please try again.'}), 500
+
+        jwt_token = create_user_access_token(target_user)
+        return jsonify({
+            'message': 'Admin credentials updated successfully.',
+            'user': _user_payload(target_user),
+            'token': jwt_token,
+        }), 200
 
     try:
         admin_user.name = new_name
