@@ -9,6 +9,7 @@ GET    /api/verify-email?token=    – activate account via email link
 POST   /api/resend-verification    – request a fresh verification email (JWT required)
 POST   /api/forgot-password        – request a password-reset link
 POST   /api/reset-password         – apply new password via token
+POST   /api/admin/credentials      – rotate admin email/password (JWT admin)
 """
 
 import logging
