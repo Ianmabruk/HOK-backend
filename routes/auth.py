@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from datetime import datetime, timedelta
 
 import bcrypt
-from sqlalchemy import func, text
+from sqlalchemy import func, text, inspect
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     jwt_required,
@@ -101,10 +101,16 @@ def _get_user_by_email(email: str):
         logger.warning("Falling back to raw user lookup due to ORM schema mismatch")
 
     try:
+        columns = {col['name'] for col in inspect(db.engine).get_columns('users')}
+        select_cols = ['id', 'name', 'email', 'password', 'role']
+        if 'email_verified' in columns:
+            select_cols.append('email_verified')
+        if 'created_at' in columns:
+            select_cols.append('created_at')
         row = db.session.execute(
             text(
-                """
-                SELECT id, name, email, password, role, email_verified
+                f"""
+                SELECT {', '.join(select_cols)}
                 FROM users
                 WHERE lower(email) = :email
                 LIMIT 1
@@ -125,8 +131,8 @@ def _get_user_by_email(email: str):
         email=row['email'],
         password=row['password'],
         role=row['role'],
-        email_verified=row['email_verified'],
-        created_at=None,
+        email_verified=row.get('email_verified', False),
+        created_at=row.get('created_at'),
         last_login_at=None,
         last_login_ip=None,
     )
@@ -191,6 +197,15 @@ def _user_payload(user):
     }
 
 
+def _user_table_columns() -> set[str]:
+    try:
+        return {col['name'] for col in inspect(db.engine).get_columns('users')}
+    except Exception:
+        db.session.rollback()
+        logger.warning('Could not inspect users table columns; using ORM defaults')
+        return set()
+
+
 # ─── POST /register ───────────────────────────────────────────────────────────
 
 @auth_bp.post("/register")
@@ -223,17 +238,56 @@ def register():
         email_verified = role == "admin"
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=_bcrypt_rounds())).decode()
 
-        user = User(name=name, email=email, password=hashed, role=role, email_verified=email_verified)
-        db.session.add(user)
-        db.session.flush()  # populate user.id
+        user = None
+        persisted_via_fallback = False
+        try:
+            columns = _user_table_columns()
+            user_kwargs = {
+                'name': name,
+                'email': email,
+                'password': hashed,
+                'role': role,
+            }
+            if not columns or 'email_verified' in columns:
+                user_kwargs['email_verified'] = email_verified
+
+            user = User(**user_kwargs)
+            db.session.add(user)
+            db.session.flush()  # populate user.id
+        except Exception:
+            db.session.rollback()
+            logger.warning('Falling back to raw SQL insert for register email=%s', email, exc_info=True)
+            columns = _user_table_columns()
+            insert_values = {
+                'name': name,
+                'email': email,
+                'password': hashed,
+                'role': role,
+            }
+            if 'email_verified' in columns:
+                insert_values['email_verified'] = email_verified
+            sql_cols = ', '.join(insert_values.keys())
+            sql_params = ', '.join(f':{key}' for key in insert_values)
+            db.session.execute(text(f'INSERT INTO users ({sql_cols}) VALUES ({sql_params})'), insert_values)
+            db.session.commit()
+            persisted_via_fallback = True
+            user = _get_user_by_email(email)
+            if not user:
+                raise RuntimeError('Failed to load newly created user after fallback insert')
+
+        if not persisted_via_fallback:
+            db.session.commit()
 
         verify_url = None
         if not email_verified:
-            verify_token = _make_token(user.id, "verify_email", hours=24)
-            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
-            verify_url = f"{frontend_url}/verify-email?token={verify_token}"
-
-        db.session.commit()
+            try:
+                verify_token = _make_token(user.id, "verify_email", hours=24)
+                frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+                verify_url = f"{frontend_url}/verify-email?token={verify_token}"
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logger.warning('Could not create email verification token for %s', email, exc_info=True)
 
         if verify_url:
             try:
@@ -243,7 +297,7 @@ def register():
 
         jwt_token = create_user_access_token(user)
         return jsonify({
-            "user": user.to_dict(),
+            "user": _user_payload(user),
             "token": jwt_token,
             "message": (
                 f"Admin account created for {configured_admin_email}. You can now access the dashboard."
