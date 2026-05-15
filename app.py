@@ -87,10 +87,33 @@ def _ensure_before_after_columns(app):
     if 'before_after_projects' not in tables:
         return
     existing = {c['name'] for c in inspector.get_columns('before_after_projects')}
+    alterations = []
+    if 'description' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN description TEXT')
+    if 'room_type' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN room_type VARCHAR(80)')
+    if 'style' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN style VARCHAR(80)')
+    if 'before_video_url' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN before_video_url TEXT')
+    if 'after_video_url' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN after_video_url TEXT')
+    if 'before_poster_url' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN before_poster_url TEXT')
+    if 'after_poster_url' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN after_poster_url TEXT')
+    if 'sort_order' not in existing:
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
     if 'is_published' not in existing:
-        with db.engine.begin() as conn:
-            conn.execute(text('ALTER TABLE before_after_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT TRUE'))
-        app.logger.info('Added is_published column to before_after_projects')
+        alterations.append('ALTER TABLE before_after_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT TRUE')
+
+    if not alterations:
+        return
+
+    with db.engine.begin() as conn:
+        for statement in alterations:
+            conn.execute(text(statement))
+    app.logger.info('Applied lightweight before_after schema updates: %s', ', '.join(alterations))
 
 
 def _ensure_user_columns(app):
