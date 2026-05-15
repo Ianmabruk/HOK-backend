@@ -21,10 +21,15 @@ logger = logging.getLogger(__name__)
 
 @portfolio_bp.get('/portfolio')
 def list_projects():
-    projects = PortfolioProject.query.filter(
-        PortfolioProject.is_published.isnot(False)
-    ).order_by(PortfolioProject.sort_order, PortfolioProject.created_at).all()
-    return jsonify([p.to_dict() for p in projects]), 200
+    try:
+        projects = PortfolioProject.query.filter(
+            PortfolioProject.is_published.isnot(False)
+        ).order_by(PortfolioProject.sort_order, PortfolioProject.created_at).all()
+        return jsonify([p.to_dict() for p in projects]), 200
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to load published portfolio projects; returning empty list')
+        return jsonify([]), 200
 
 
 @portfolio_bp.get('/portfolio/all')
@@ -32,10 +37,15 @@ def list_projects():
 def list_all_projects():
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
-    projects = PortfolioProject.query.order_by(
-        PortfolioProject.sort_order, PortfolioProject.created_at
-    ).all()
-    return jsonify([p.to_dict() for p in projects]), 200
+    try:
+        projects = PortfolioProject.query.order_by(
+            PortfolioProject.sort_order, PortfolioProject.created_at
+        ).all()
+        return jsonify([p.to_dict() for p in projects]), 200
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to load all portfolio projects; returning empty list')
+        return jsonify([]), 200
 
 
 @portfolio_bp.post('/portfolio')

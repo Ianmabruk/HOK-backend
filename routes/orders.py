@@ -134,69 +134,73 @@ def get_orders():
     except Exception:
         db.session.rollback()
         logger.exception('Falling back to raw SQL serialization for /orders')
+        try:
+            if current_user_role() == 'admin':
+                orders_rows = db.session.execute(
+                    text(
+                        """
+                        SELECT id, user_id, total_price, status, shipping_info, created_at
+                        FROM orders
+                        ORDER BY created_at DESC
+                        """
+                    )
+                ).mappings().all()
+            else:
+                orders_rows = db.session.execute(
+                    text(
+                        """
+                        SELECT id, user_id, total_price, status, shipping_info, created_at
+                        FROM orders
+                        WHERE CAST(user_id AS TEXT) = :uid
+                        ORDER BY created_at DESC
+                        """
+                    ),
+                    {'uid': str(current_user_id())},
+                ).mappings().all()
 
-        if current_user_role() == 'admin':
-            orders_rows = db.session.execute(
-                text(
-                    """
-                    SELECT id, user_id, total_price, status, shipping_info, created_at
-                    FROM orders
-                    ORDER BY created_at DESC
-                    """
-                )
-            ).mappings().all()
-        else:
-            orders_rows = db.session.execute(
-                text(
-                    """
-                    SELECT id, user_id, total_price, status, shipping_info, created_at
-                    FROM orders
-                    WHERE CAST(user_id AS TEXT) = :uid
-                    ORDER BY created_at DESC
-                    """
-                ),
-                {'uid': str(current_user_id())},
-            ).mappings().all()
+            payload = []
+            for row in orders_rows:
+                item_rows = db.session.execute(
+                    text(
+                        """
+                        SELECT id, product_id, quantity, unit_price, unit_cost, product_title, product_image, customizations
+                        FROM order_items
+                        WHERE order_id = :oid
+                        ORDER BY id ASC
+                        """
+                    ),
+                    {'oid': row['id']},
+                ).mappings().all()
 
-        payload = []
-        for row in orders_rows:
-            item_rows = db.session.execute(
-                text(
-                    """
-                    SELECT id, product_id, quantity, unit_price, unit_cost, product_title, product_image, customizations
-                    FROM order_items
-                    WHERE order_id = :oid
-                    ORDER BY id ASC
-                    """
-                ),
-                {'oid': row['id']},
-            ).mappings().all()
+                payload.append({
+                    'id': row['id'],
+                    'user_id': str(row.get('user_id')) if row.get('user_id') is not None else None,
+                    'user': None,
+                    'total_price': float(row.get('total_price') or 0),
+                    'status': row.get('status'),
+                    'shipping_info': row.get('shipping_info') or {},
+                    'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+                    'items': [
+                        {
+                            'id': item['id'],
+                            'product_id': str(item.get('product_id')) if item.get('product_id') is not None else None,
+                            'quantity': item.get('quantity'),
+                            'unit_price': float(item.get('unit_price')) if item.get('unit_price') is not None else None,
+                            'unit_cost': float(item.get('unit_cost')) if item.get('unit_cost') is not None else None,
+                            'product_title': item.get('product_title'),
+                            'product_image': item.get('product_image'),
+                            'customizations': item.get('customizations'),
+                            'product': None,
+                        }
+                        for item in item_rows
+                    ],
+                })
 
-            payload.append({
-                'id': row['id'],
-                'user_id': str(row.get('user_id')) if row.get('user_id') is not None else None,
-                'user': None,
-                'total_price': float(row.get('total_price') or 0),
-                'status': row.get('status'),
-                'shipping_info': row.get('shipping_info') or {},
-                'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
-                'items': [
-                    {
-                        'id': item['id'],
-                        'product_id': str(item.get('product_id')) if item.get('product_id') is not None else None,
-                        'quantity': item.get('quantity'),
-                        'unit_price': float(item.get('unit_price')) if item.get('unit_price') is not None else None,
-                        'unit_cost': float(item.get('unit_cost')) if item.get('unit_cost') is not None else None,
-                        'product_title': item.get('product_title'),
-                        'product_image': item.get('product_image'),
-                        'customizations': item.get('customizations'),
-                        'product': None,
-                    }
-                    for item in item_rows
-                ],
-            })
-
-        return jsonify(payload), 200
+            return jsonify(payload), 200
+        except Exception:
+            db.session.rollback()
+            logger.exception('Raw SQL fallback failed for /orders; returning empty list')
+            return jsonify([]), 200
 
 
 @orders_bp.put('/orders/<int:oid>/status')
