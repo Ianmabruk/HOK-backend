@@ -24,7 +24,7 @@ from flask_jwt_extended import (
     jwt_required,
 )
 
-from auth_utils import create_user_access_token, current_user_id
+from auth_utils import create_user_access_token, current_user_id, current_user_role
 from models.models import EmailToken, User, db
 from services.email_service import (
     send_login_notice,
@@ -390,6 +390,60 @@ def setup_status():
         "requires_admin_setup": not has_admin,
         "admin_email": _configured_admin_email(),
         "admin_name": _configured_admin_name(),
+    }), 200
+
+
+@auth_bp.post('/admin/credentials')
+@jwt_required()
+def rotate_admin_credentials():
+    if current_user_role() != 'admin':
+        return jsonify({'message': 'Admin only'}), 403
+
+    data = request.get_json(silent=True) or {}
+    new_email = _normalize_email(data.get('email', ''))
+    new_password = data.get('password', '')
+    new_name = (data.get('name') or 'Admin').strip() or 'Admin'
+
+    if not new_email:
+        return jsonify({'message': 'Email is required'}), 400
+
+    pw_err = _validate_password(new_password)
+    if pw_err:
+        return jsonify({'message': pw_err}), 400
+
+    admin_user = db.session.get(User, current_user_id())
+    if not admin_user:
+        return jsonify({'message': 'User not found'}), 404
+    if admin_user.role != 'admin':
+        return jsonify({'message': 'Admin only'}), 403
+
+    existing = _get_user_by_email(new_email)
+    if existing and str(getattr(existing, 'id', None)) != str(admin_user.id):
+        return jsonify({'message': 'Email already registered'}), 409
+
+    try:
+        admin_user.name = new_name
+        admin_user.email = new_email
+        admin_user.password_hash = bcrypt.hashpw(
+            new_password.encode(),
+            bcrypt.gensalt(rounds=_bcrypt_rounds()),
+        ).decode()
+        admin_user.role = 'admin'
+        admin_user.email_verified = True
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'message': 'Email already registered'}), 409
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to rotate admin credentials for user_id=%s', admin_user.id)
+        return jsonify({'message': 'Failed to update admin credentials. Please try again.'}), 500
+
+    jwt_token = create_user_access_token(admin_user)
+    return jsonify({
+        'message': 'Admin credentials updated successfully.',
+        'user': _user_payload(admin_user),
+        'token': jwt_token,
     }), 200
 
 
