@@ -1,4 +1,5 @@
 from flask_jwt_extended import create_access_token, get_jwt, get_jwt_identity
+import uuid
 
 
 def create_user_access_token(user):
@@ -11,7 +12,12 @@ def create_user_access_token(user):
 
 def current_user_id():
     identity = get_jwt_identity()
-    return int(identity) if identity is not None else None
+    if identity is None:
+        return None
+    try:
+        return uuid.UUID(str(identity))
+    except (ValueError, TypeError):
+        return None
 
 
 def current_user_role():
@@ -20,7 +26,12 @@ def current_user_role():
 
 def token_user_id(decoded_token):
     subject = decoded_token.get("sub")
-    return int(subject) if subject is not None else None
+    if subject is None:
+        return None
+    try:
+        return uuid.UUID(str(subject))
+    except (ValueError, TypeError):
+        return None
 
 
 def token_user_role(decoded_token):

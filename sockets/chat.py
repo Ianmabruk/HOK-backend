@@ -1,9 +1,17 @@
 from flask_socketio import SocketIO, emit, join_room
+import uuid
 from auth_utils import token_user_id, token_user_role
 from models.models import db, Chat
 from flask_jwt_extended import decode_token
 
 socketio = SocketIO()
+
+
+def _safe_uuid(value):
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 def register_socket_events(socketio):
@@ -68,7 +76,7 @@ def register_socket_events(socketio):
 
         emit('admin_conversations', [
             {
-                'user_id': r.user_id,
+                'user_id': str(r.user_id) if r.user_id is not None else None,
                 'user_name': r.sender,
                 'last_message': r.text,
                 'product_id': r.product_id,
@@ -81,12 +89,14 @@ def register_socket_events(socketio):
 
     @socketio.on('admin_get_room')
     def on_admin_get_room(data):
-        msgs = Chat.query.filter_by(user_id=data.get('user_id')).order_by(Chat.timestamp.asc()).all()
+        uid = _safe_uuid(data.get('user_id'))
+        msgs = Chat.query.filter_by(user_id=uid).order_by(Chat.timestamp.asc()).all()
         emit('admin_room_messages', [m.to_dict() for m in msgs])
 
     @socketio.on('admin_reply')
     def on_admin_reply(data):
-        msg = Chat(user_id=data.get('user_id'), sender='Admin', text=data['text'])
+        uid = _safe_uuid(data.get('user_id'))
+        msg = Chat(user_id=uid, sender='Admin', text=data['text'])
         db.session.add(msg)
         db.session.commit()
-        emit('chat_message', msg.to_dict(), room=f"user_{data.get('user_id')}")
+        emit('chat_message', msg.to_dict(), room=f"user_{str(uid) if uid is not None else ''}")

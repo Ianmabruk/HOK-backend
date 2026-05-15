@@ -1,12 +1,15 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+import uuid
+
+from sqlalchemy.dialects.postgresql import UUID
 
 db = SQLAlchemy()
 
 
 class User(db.Model):
     __tablename__ = 'users'
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password = db.Column(db.String(255), nullable=False)
@@ -18,7 +21,7 @@ class User(db.Model):
 
     def to_dict(self):
         return {
-            'id': self.id,
+            'id': str(self.id) if self.id is not None else None,
             'name': self.name,
             'email': self.email,
             'role': self.role,
@@ -33,7 +36,7 @@ class EmailToken(db.Model):
     """Stores single-use tokens for email verification and password reset."""
     __tablename__ = 'email_tokens'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     token = db.Column(db.String(128), unique=True, nullable=False, index=True)
     # 'verify_email' | 'password_reset'
     token_type = db.Column(db.String(30), nullable=False)
@@ -53,8 +56,8 @@ class EmailDeliveryLog(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    recipient_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    triggered_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    recipient_user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id'), nullable=True)
+    triggered_by_user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id'), nullable=True)
     recipient_name = db.Column(db.String(120), nullable=True)
     recipient_email = db.Column(db.String(255), nullable=False)
     subject = db.Column(db.String(255), nullable=False)
@@ -72,8 +75,8 @@ class EmailDeliveryLog(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
-            'recipient_user_id': self.recipient_user_id,
-            'triggered_by_user_id': self.triggered_by_user_id,
+            'recipient_user_id': str(self.recipient_user_id) if self.recipient_user_id is not None else None,
+            'triggered_by_user_id': str(self.triggered_by_user_id) if self.triggered_by_user_id is not None else None,
             'recipient_name': self.recipient_name,
             'recipient_email': self.recipient_email,
             'subject': self.subject,
@@ -138,7 +141,7 @@ class Order(db.Model):
         db.Index('ix_orders_created_at', 'created_at'),
     )
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id'), nullable=False)
     total_price = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(db.String(30), default='pending')
     shipping_info = db.Column(db.JSON)
@@ -148,7 +151,7 @@ class Order(db.Model):
 
     def to_dict(self):
         return {
-            'id': self.id, 'user_id': self.user_id,
+            'id': self.id, 'user_id': str(self.user_id) if self.user_id is not None else None,
             'user': self.user.to_dict() if self.user else None,
             'total_price': float(self.total_price), 'status': self.status,
             'shipping_info': self.shipping_info,
@@ -188,7 +191,7 @@ class Chat(db.Model):
         db.Index('ix_chats_timestamp', 'timestamp'),
     )
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id'), nullable=True)
     sender = db.Column(db.String(80))
     text = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
@@ -200,7 +203,7 @@ class Chat(db.Model):
 
     def to_dict(self):
         return {
-            'id': self.id, 'user_id': self.user_id, 'sender': self.sender,
+            'id': self.id, 'user_id': str(self.user_id) if self.user_id is not None else None, 'sender': self.sender,
             'text': self.text, 'timestamp': self.timestamp.isoformat(),
             'product_id': self.product_id, 'product_title': self.product_title,
             'product_price': self.product_price, 'product_image': self.product_image,
@@ -295,7 +298,7 @@ class WishlistItem(db.Model):
         db.Index('ix_wishlist_items_user_id', 'user_id'),
     )
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -314,7 +317,7 @@ class VirtualConsultation(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     client_name = db.Column(db.String(120), nullable=False)
     client_email = db.Column(db.String(255), nullable=False)
     client_phone = db.Column(db.String(60), nullable=True)
@@ -337,7 +340,7 @@ class VirtualConsultation(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
-            'user_id': self.user_id,
+            'user_id': str(self.user_id) if self.user_id is not None else None,
             'client_name': self.client_name,
             'client_email': self.client_email,
             'client_phone': self.client_phone,
@@ -366,7 +369,7 @@ class ClientRoomUpload(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     consultation_id = db.Column(db.Integer, db.ForeignKey('virtual_consultations.id', ondelete='CASCADE'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     file_url = db.Column(db.Text, nullable=False)
     file_type = db.Column(db.String(20), nullable=False)
     file_label = db.Column(db.String(120), nullable=True)
@@ -382,7 +385,7 @@ class ClientRoomUpload(db.Model):
         return {
             'id': self.id,
             'consultation_id': self.consultation_id,
-            'user_id': self.user_id,
+            'user_id': str(self.user_id) if self.user_id is not None else None,
             'file_url': self.file_url,
             'file_type': self.file_type,
             'file_label': self.file_label,
@@ -409,7 +412,7 @@ class VirtualProject(db.Model):
     status = db.Column(db.String(40), default='planning', nullable=False)
     progress_percent = db.Column(db.Integer, default=0, nullable=False)
     milestones = db.Column(db.JSON, nullable=True)
-    assigned_designer_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    assigned_designer_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -427,7 +430,7 @@ class VirtualProject(db.Model):
             'status': self.status,
             'progress_percent': self.progress_percent,
             'milestones': self.milestones or [],
-            'assigned_designer_id': self.assigned_designer_id,
+            'assigned_designer_id': str(self.assigned_designer_id) if self.assigned_designer_id is not None else None,
             'is_archived': self.is_archived,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -447,7 +450,7 @@ class ProjectProgress(db.Model):
     progress_percent = db.Column(db.Integer, default=0, nullable=False)
     status = db.Column(db.String(40), default='in_progress', nullable=False)
     notes = db.Column(db.Text, nullable=True)
-    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_by_user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     project = db.relationship('VirtualProject', backref=db.backref('progress_updates', lazy=True, cascade='all, delete-orphan'))
@@ -461,7 +464,7 @@ class ProjectProgress(db.Model):
             'progress_percent': self.progress_percent,
             'status': self.status,
             'notes': self.notes,
-            'updated_by_user_id': self.updated_by_user_id,
+            'updated_by_user_id': str(self.updated_by_user_id) if self.updated_by_user_id is not None else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -477,8 +480,8 @@ class AppointmentBooking(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     consultation_id = db.Column(db.Integer, db.ForeignKey('virtual_consultations.id', ondelete='SET NULL'), nullable=True)
     project_id = db.Column(db.Integer, db.ForeignKey('virtual_projects.id', ondelete='SET NULL'), nullable=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    designer_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    designer_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     start_at = db.Column(db.DateTime, nullable=False)
     end_at = db.Column(db.DateTime, nullable=False)
     meeting_link = db.Column(db.Text, nullable=True)
@@ -498,8 +501,8 @@ class AppointmentBooking(db.Model):
             'id': self.id,
             'consultation_id': self.consultation_id,
             'project_id': self.project_id,
-            'user_id': self.user_id,
-            'designer_id': self.designer_id,
+            'user_id': str(self.user_id) if self.user_id is not None else None,
+            'designer_id': str(self.designer_id) if self.designer_id is not None else None,
             'start_at': self.start_at.isoformat() if self.start_at else None,
             'end_at': self.end_at.isoformat() if self.end_at else None,
             'meeting_link': self.meeting_link,
@@ -520,8 +523,8 @@ class DesignerAssignment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey('virtual_projects.id', ondelete='CASCADE'), nullable=False)
-    designer_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    assigned_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    designer_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    assigned_by_user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
@@ -533,8 +536,8 @@ class DesignerAssignment(db.Model):
         return {
             'id': self.id,
             'project_id': self.project_id,
-            'designer_id': self.designer_id,
-            'assigned_by_user_id': self.assigned_by_user_id,
+            'designer_id': str(self.designer_id) if self.designer_id is not None else None,
+            'assigned_by_user_id': str(self.assigned_by_user_id) if self.assigned_by_user_id is not None else None,
             'notes': self.notes,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

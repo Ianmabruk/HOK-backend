@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+import uuid
 from models.models import EmailDeliveryLog, User, WishlistItem, db
 from flask_jwt_extended import jwt_required
 
@@ -6,6 +7,13 @@ from auth_utils import current_user_id, current_user_role
 from services.email_service import send_admin_message
 
 users_bp = Blueprint('users', __name__)
+
+
+def _safe_uuid(value):
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 def _admin_only():
@@ -47,10 +55,9 @@ def email_users():
     elif recipient_mode == 'selected':
         normalized_ids = []
         for raw_id in user_ids:
-            try:
-                normalized_ids.append(int(raw_id))
-            except (TypeError, ValueError):
-                continue
+            parsed = _safe_uuid(raw_id)
+            if parsed is not None:
+                normalized_ids.append(parsed)
         if not normalized_ids:
             return jsonify({'message': 'Select at least one user to email'}), 400
         recipients = User.query.filter(
@@ -91,13 +98,13 @@ def email_users():
         'recipient_mode': recipient_mode,
         'delivery_logs': [delivery_log.to_dict() for _, delivery_log in delivery_logs],
         'recipients': [
-            {'id': user.id, 'name': user.name, 'email': user.email}
+            {'id': str(user.id) if user.id is not None else None, 'name': user.name, 'email': user.email}
             for user in recipients
         ],
     }), 200
 
 
-@users_bp.delete('/users/<int:uid>')
+@users_bp.delete('/users/<uuid:uid>')
 @jwt_required()
 def delete_user(uid):
     err = _admin_only()

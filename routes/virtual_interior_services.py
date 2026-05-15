@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import uuid
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
@@ -57,6 +58,13 @@ def _safe_bool(value, default=False):
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _safe_uuid(value):
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _pagination(default_limit=12, max_limit=100):
@@ -394,7 +402,7 @@ def admin_create_virtual_project():
         status=status,
         progress_percent=_safe_int(data.get('progress_percent'), default=0, min_value=0, max_value=100),
         milestones=data.get('milestones') if isinstance(data.get('milestones'), list) else [],
-        assigned_designer_id=_safe_int(data.get('assigned_designer_id'), default=0, min_value=0) or None,
+        assigned_designer_id=_safe_uuid(data.get('assigned_designer_id')),
         is_archived=_safe_bool(data.get('is_archived'), default=False),
     )
     db.session.add(project)
@@ -437,7 +445,7 @@ def admin_update_virtual_project(project_id):
     if 'milestones' in data and isinstance(data.get('milestones'), list):
         project.milestones = data.get('milestones')
     if 'assigned_designer_id' in data:
-        project.assigned_designer_id = _safe_int(data.get('assigned_designer_id'), default=0, min_value=0) or None
+        project.assigned_designer_id = _safe_uuid(data.get('assigned_designer_id'))
     if 'is_archived' in data:
         project.is_archived = _safe_bool(data.get('is_archived'), default=False)
 
@@ -489,14 +497,14 @@ def admin_create_designer_assignment():
 
     data = request.get_json(silent=True) or {}
     project_id = _safe_int(data.get('project_id'), default=0, min_value=0)
-    designer_id = _safe_int(data.get('designer_id'), default=0, min_value=0)
+    designer_id = _safe_uuid(data.get('designer_id'))
 
     if project_id <= 0 or not db.session.get(VirtualProject, project_id):
         return jsonify({'message': 'Valid project_id is required'}), 400
 
     assignment = DesignerAssignment(
         project_id=project_id,
-        designer_id=designer_id or None,
+        designer_id=designer_id,
         assigned_by_user_id=current_user_id(),
         notes=_safe_text(data.get('notes'), max_len=2000) or None,
     )
@@ -544,7 +552,7 @@ def admin_update_virtual_booking(booking_id):
         booking.status = status
 
     if 'designer_id' in data:
-        booking.designer_id = _safe_int(data.get('designer_id'), default=0, min_value=0) or None
+        booking.designer_id = _safe_uuid(data.get('designer_id'))
     if 'meeting_link' in data:
         booking.meeting_link = _safe_text(data.get('meeting_link'), max_len=500) or None
     if 'notes' in data:
