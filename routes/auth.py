@@ -157,7 +157,12 @@ def _serialize_dt(value):
 
 
 def _bcrypt_rounds() -> int:
-    rounds = int(current_app.config.get('BCRYPT_LOG_ROUNDS', 11))
+    configured = current_app.config.get('BCRYPT_LOG_ROUNDS', 11)
+    try:
+        rounds = int(configured)
+    except (TypeError, ValueError):
+        logger.warning('Invalid BCRYPT_LOG_ROUNDS=%r; falling back to 11', configured)
+        rounds = 11
     return min(max(rounds, 8), 14)
 
 
