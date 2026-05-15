@@ -32,7 +32,12 @@ def _allowed_origins(app):
         frontend_url,
         'http://localhost:5173',
         'http://127.0.0.1:5173',
+        'https://localhost:5173',
+        'https://127.0.0.1:5173',
         'https://hok-interior.netlify.app',
+        'https://hokinterior.com',
+        'https://www.hokinterior.com',
+        'https://hok-interior.vercel.app',
     }
     origins.update(origin.strip().rstrip('/') for origin in extra_origins.split(',') if origin.strip())
     return [origin for origin in origins if origin]
