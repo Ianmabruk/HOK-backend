@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 import bcrypt
 from sqlalchemy import func, text, inspect
+from sqlalchemy.exc import IntegrityError
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     jwt_required,
@@ -102,7 +103,7 @@ def _get_user_by_email(email: str):
 
     try:
         columns = {col['name'] for col in inspect(db.engine).get_columns('users')}
-        select_cols = ['id', 'name', 'email', 'password', 'role']
+        select_cols = ['id', 'name', 'email', 'password_hash', 'role']
         if 'email_verified' in columns:
             select_cols.append('email_verified')
         if 'created_at' in columns:
@@ -129,7 +130,7 @@ def _get_user_by_email(email: str):
         id=row['id'],
         name=row['name'],
         email=row['email'],
-        password=row['password'],
+        password_hash=row['password_hash'],
         role=row['role'],
         email_verified=row.get('email_verified', False),
         created_at=row.get('created_at'),
@@ -139,7 +140,7 @@ def _get_user_by_email(email: str):
 
 
 def _password_matches(user, plain_password: str) -> bool:
-    stored = getattr(user, 'password', None)
+    stored = getattr(user, 'password_hash', None)
     if not isinstance(stored, str) or not stored:
         return False
     try:
@@ -211,6 +212,18 @@ def _user_table_columns() -> set[str]:
         return set()
 
 
+def _validate_users_auth_schema() -> bool:
+    columns = _user_table_columns()
+    if not columns:
+        return True
+    required = {'name', 'email', 'role', 'email_verified', 'password_hash'}
+    missing = required.difference(columns)
+    if missing:
+        logger.error('users table missing required auth columns: %s', ', '.join(sorted(missing)))
+        return False
+    return True
+
+
 # ─── POST /register ───────────────────────────────────────────────────────────
 
 @auth_bp.post("/register")
@@ -229,6 +242,9 @@ def register():
         return jsonify({"message": pw_err}), 400
 
     try:
+        if not _validate_users_auth_schema():
+            return jsonify({"message": "Registration temporarily unavailable due to a server configuration issue."}), 500
+
         if _get_user_by_email(email):
             return jsonify({"message": "Email already registered"}), 409
 
@@ -244,69 +260,25 @@ def register():
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=_bcrypt_rounds())).decode()
 
         user = None
-        persisted_via_fallback = False
         try:
-            columns = _user_table_columns()
-            user_kwargs = {
-                'name': name,
-                'email': email,
-                'password': hashed,
-                'role': role,
-            }
-            if not columns or 'email_verified' in columns:
-                user_kwargs['email_verified'] = email_verified
-
-            user = User(**user_kwargs)
+            user = User(
+                name=name,
+                email=email,
+                password_hash=hashed,
+                role=role,
+                email_verified=email_verified,
+            )
             db.session.add(user)
             db.session.flush()  # populate user.id
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({"message": "Email already registered"}), 409
         except Exception:
             db.session.rollback()
-            logger.warning('Falling back to raw SQL insert for register email=%s', email, exc_info=True)
-            columns = _user_table_columns()
-            insert_values = {
-                'name': name,
-                'email': email,
-                'password': hashed,
-                'role': role,
-            }
-            if 'email_verified' in columns:
-                insert_values['email_verified'] = email_verified
+            logger.exception('Register insert failed for email=%s', email)
+            return jsonify({"message": "Registration failed due to a server error. Please try again."}), 500
 
-            try:
-                column_defs = inspect(db.engine).get_columns('users')
-            except Exception:
-                column_defs = []
-
-            for column in column_defs:
-                column_name = column.get('name')
-                if not column_name or column_name in insert_values or column_name == 'id':
-                    continue
-                if column.get('nullable', True):
-                    continue
-                if column.get('default') is not None:
-                    continue
-
-                type_name = str(column.get('type') or '').lower()
-                if 'bool' in type_name:
-                    insert_values[column_name] = False
-                elif any(token in type_name for token in ('int', 'numeric', 'decimal', 'float', 'double')):
-                    insert_values[column_name] = 0
-                elif 'date' in type_name or 'time' in type_name:
-                    insert_values[column_name] = datetime.utcnow()
-                else:
-                    insert_values[column_name] = ''
-
-            sql_cols = ', '.join(insert_values.keys())
-            sql_params = ', '.join(f':{key}' for key in insert_values)
-            db.session.execute(text(f'INSERT INTO users ({sql_cols}) VALUES ({sql_params})'), insert_values)
-            db.session.commit()
-            persisted_via_fallback = True
-            user = _get_user_by_email(email)
-            if not user:
-                raise RuntimeError('Failed to load newly created user after fallback insert')
-
-        if not persisted_via_fallback:
-            db.session.commit()
+        db.session.commit()
 
         verify_url = None
         if not email_verified:
@@ -512,7 +484,7 @@ def reset_password():
         return jsonify({"message": "Reset link has expired. Please request a new one."}), 400
 
     user = record.user
-    user.password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=_bcrypt_rounds())).decode()
+    user.password_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=_bcrypt_rounds())).decode()
     record.used = True
     db.session.commit()
 

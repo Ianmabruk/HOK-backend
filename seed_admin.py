@@ -23,7 +23,7 @@ with app.app_context():
   if existing_admin:
     existing_admin.name = ADMIN_NAME
     existing_admin.email = ADMIN_EMAIL
-    existing_admin.password = hashed
+    existing_admin.password_hash = hashed
     existing_admin.role = 'admin'
     existing_admin.email_verified = True
     db.session.commit()
@@ -32,7 +32,7 @@ with app.app_context():
     admin = User(
       name=ADMIN_NAME,
       email=ADMIN_EMAIL,
-      password=hashed,
+      password_hash=hashed,
       role='admin',
       email_verified=True,
     )
