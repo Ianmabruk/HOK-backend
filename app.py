@@ -118,8 +118,26 @@ def _ensure_portfolio_columns(app):
         return
     existing = {c['name'] for c in inspector.get_columns('portfolio_projects')}
     alterations = []
+    if 'summary' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN summary VARCHAR(400)')
+    if 'description' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN description TEXT')
+    if 'image_url' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN image_url TEXT')
     if 'video_url' not in existing:
         alterations.append('ALTER TABLE portfolio_projects ADD COLUMN video_url TEXT')
+    if 'room_type' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN room_type VARCHAR(80)')
+    if 'style' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN style VARCHAR(80)')
+    if 'year' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN year VARCHAR(10)')
+    if 'location' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN location VARCHAR(120)')
+    if 'sort_order' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
+    if 'is_published' not in existing:
+        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT TRUE')
     if not alterations:
         return
     with db.engine.begin() as conn:
