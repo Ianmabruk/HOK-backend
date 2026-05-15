@@ -81,6 +81,29 @@ def _ensure_product_columns(app):
         app.logger.info('Added cost_price column to products')
 
 
+def _ensure_vendor_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'vendors' not in tables:
+        return
+    existing = {c['name'] for c in inspector.get_columns('vendors')}
+    alterations = []
+    if 'contact' not in existing:
+        alterations.append('ALTER TABLE vendors ADD COLUMN contact VARCHAR(50)')
+    if 'email' not in existing:
+        alterations.append('ALTER TABLE vendors ADD COLUMN email VARCHAR(255)')
+    if 'address' not in existing:
+        alterations.append('ALTER TABLE vendors ADD COLUMN address TEXT')
+
+    if not alterations:
+        return
+
+    with db.engine.begin() as conn:
+        for statement in alterations:
+            conn.execute(text(statement))
+    app.logger.info('Applied lightweight vendors schema updates: %s', ', '.join(alterations))
+
+
 def _ensure_before_after_columns(app):
     inspector = inspect(db.engine)
     tables = inspector.get_table_names()
@@ -203,6 +226,7 @@ def create_app():
             _ensure_portfolio_columns(app)
             _ensure_order_item_columns(app)
             _ensure_product_columns(app)
+            _ensure_vendor_columns(app)
             _ensure_before_after_columns(app)
         except Exception:
             app.logger.exception('Database initialization (create_all + lightweight schema updates) failed; continuing without schema sync.')

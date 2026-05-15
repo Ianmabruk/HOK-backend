@@ -14,6 +14,7 @@ import uuid
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
+from sqlalchemy import inspect
 
 from auth_utils import current_user_role
 from models.models import BeforeAfterProject, db
@@ -32,9 +33,23 @@ def _request_error_context() -> str:
 
 def _safe_int(value, default=0):
     try:
+        if value is None or value == '':
+            return default
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _before_after_order_exprs():
+    try:
+        columns = {c['name'] for c in inspect(db.engine).get_columns('before_after_projects')}
+    except Exception:
+        db.session.rollback()
+        return [BeforeAfterProject.created_at.desc()]
+
+    if 'sort_order' in columns:
+        return [BeforeAfterProject.sort_order, BeforeAfterProject.created_at]
+    return [BeforeAfterProject.created_at.desc()]
 
 
 @before_after_bp.get("/before-after")
@@ -43,9 +58,7 @@ def list_projects():
     try:
         projects = BeforeAfterProject.query.filter(
             BeforeAfterProject.is_published.isnot(False)
-        ).order_by(
-            BeforeAfterProject.sort_order, BeforeAfterProject.created_at
-        ).all()
+        ).order_by(*_before_after_order_exprs()).all()
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
         db.session.rollback()
@@ -60,9 +73,7 @@ def list_all_projects():
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
     try:
-        projects = BeforeAfterProject.query.order_by(
-            BeforeAfterProject.sort_order, BeforeAfterProject.created_at
-        ).all()
+        projects = BeforeAfterProject.query.order_by(*_before_after_order_exprs()).all()
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
         db.session.rollback()

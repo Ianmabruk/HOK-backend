@@ -4,11 +4,13 @@ from models.models import db, Product
 from flask_jwt_extended import jwt_required
 from sqlalchemy import func, or_
 import re
+import logging
 
 from auth_utils import current_user_role
 from services.media_storage import save_media_file
 
 products_bp = Blueprint('products', __name__)
+logger = logging.getLogger(__name__)
 
 
 def _safe_uuid(value):
@@ -16,6 +18,28 @@ def _safe_uuid(value):
         return uuid.UUID(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _safe_int(value, default=0):
+    try:
+        if value is None or value == '':
+            return default
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(value, default=None):
+    try:
+        if value is None or value == '':
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _clean_text(value):
+    return str(value or '').strip() or None
 
 
 def _normalize_category(value):
@@ -36,8 +60,8 @@ def get_products():
     category = _normalize_category(request.args.get('category'))
     search = request.args.get('search')
     sort = request.args.get('sort', '')
-    page = int(request.args.get('page', 1))
-    limit = min(int(request.args.get('limit', 12)), 200)
+    page = max(_safe_int(request.args.get('page'), 1), 1)
+    limit = min(max(_safe_int(request.args.get('limit'), 12), 1), 200)
     price_min = request.args.get('price_min', 0, type=float)
     price_max = request.args.get('price_max', 1e9, type=float)
 
@@ -89,17 +113,43 @@ def create_product():
     err = admin_required()
     if err:
         return err
-    data = request.get_json()
-    p = Product(
-        title=data['title'], description=data.get('description'),
-        price=data['price'], stock=data.get('stock', 0),
-        cost_price=data.get('cost_price'),
-        category=_normalize_category(data.get('category')) or None, image_url=data.get('image_url'),
-        video_url=data.get('video_url'), vendor_id=data.get('vendor_id') or None
-    )
-    db.session.add(p)
-    db.session.commit()
-    return jsonify(p.to_dict()), 201
+    data = request.get_json(silent=True) or {}
+    title = _clean_text(data.get('title'))
+    if not title:
+        return jsonify({'error': 'Invalid input', 'field': 'title', 'message': 'Title is required'}), 400
+
+    price = _safe_float(data.get('price'))
+    if price is None or price < 0:
+        return jsonify({'error': 'Invalid input', 'field': 'price', 'message': 'Price must be a valid non-negative number'}), 400
+
+    stock = _safe_int(data.get('stock'), 0)
+    if stock < 0:
+        return jsonify({'error': 'Invalid input', 'field': 'stock', 'message': 'Stock cannot be negative'}), 400
+
+    cost_price = _safe_float(data.get('cost_price'))
+    vendor_id = _safe_int(data.get('vendor_id'), None)
+    if data.get('vendor_id') not in (None, '') and vendor_id is None:
+        return jsonify({'error': 'Invalid input', 'field': 'vendor_id', 'message': 'vendor_id must be a valid integer'}), 400
+
+    try:
+        p = Product(
+            title=title,
+            description=_clean_text(data.get('description')),
+            price=price,
+            stock=stock,
+            cost_price=cost_price,
+            category=_normalize_category(data.get('category')) or None,
+            image_url=_clean_text(data.get('image_url')),
+            video_url=_clean_text(data.get('video_url')),
+            vendor_id=vendor_id,
+        )
+        db.session.add(p)
+        db.session.commit()
+        return jsonify(p.to_dict()), 201
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to create product')
+        return jsonify({'error': 'Unexpected server error', 'message': 'Could not create product'}), 500
 
 
 @products_bp.put('/products/<uuid:pid>')
@@ -109,14 +159,55 @@ def update_product(pid):
     if err:
         return err
     p = Product.query.get_or_404(pid)
-    data = request.get_json()
-    for field in ('title', 'description', 'price', 'cost_price', 'stock', 'image_url', 'video_url', 'vendor_id'):
-        if field in data:
-            setattr(p, field, data[field] if data[field] != '' else None)
+    data = request.get_json(silent=True) or {}
+
+    if 'title' in data:
+        title = _clean_text(data.get('title'))
+        if not title:
+            return jsonify({'error': 'Invalid input', 'field': 'title', 'message': 'Title cannot be empty'}), 400
+        p.title = title
+
+    if 'description' in data:
+        p.description = _clean_text(data.get('description'))
+    if 'image_url' in data:
+        p.image_url = _clean_text(data.get('image_url'))
+    if 'video_url' in data:
+        p.video_url = _clean_text(data.get('video_url'))
+
+    if 'price' in data:
+        price = _safe_float(data.get('price'))
+        if price is None or price < 0:
+            return jsonify({'error': 'Invalid input', 'field': 'price', 'message': 'Price must be a valid non-negative number'}), 400
+        p.price = price
+
+    if 'cost_price' in data:
+        cost_price = _safe_float(data.get('cost_price'))
+        if data.get('cost_price') not in (None, '') and cost_price is None:
+            return jsonify({'error': 'Invalid input', 'field': 'cost_price', 'message': 'cost_price must be a valid number'}), 400
+        p.cost_price = cost_price
+
+    if 'stock' in data:
+        stock = _safe_int(data.get('stock'), None)
+        if stock is None or stock < 0:
+            return jsonify({'error': 'Invalid input', 'field': 'stock', 'message': 'Stock must be a valid non-negative integer'}), 400
+        p.stock = stock
+
+    if 'vendor_id' in data:
+        vendor_id = _safe_int(data.get('vendor_id'), None)
+        if data.get('vendor_id') not in (None, '') and vendor_id is None:
+            return jsonify({'error': 'Invalid input', 'field': 'vendor_id', 'message': 'vendor_id must be a valid integer'}), 400
+        p.vendor_id = vendor_id
+
     if 'category' in data:
         p.category = _normalize_category(data.get('category')) or None
-    db.session.commit()
-    return jsonify(p.to_dict())
+
+    try:
+        db.session.commit()
+        return jsonify(p.to_dict())
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to update product id=%s', pid)
+        return jsonify({'error': 'Unexpected server error', 'message': 'Could not update product'}), 500
 
 
 @products_bp.post('/products/media-upload')
