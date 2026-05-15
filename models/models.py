@@ -110,7 +110,7 @@ class Product(db.Model):
         db.Index('ix_products_created_at', 'created_at'),
         db.Index('ix_products_price', 'price'),
     )
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     price = db.Column(db.Numeric(10, 2), nullable=False)
@@ -124,7 +124,7 @@ class Product(db.Model):
 
     def to_dict(self):
         return {
-            'id': self.id, 'title': self.title, 'description': self.description,
+            'id': str(self.id) if self.id is not None else None, 'title': self.title, 'description': self.description,
             'price': float(self.price), 'video_url': self.video_url,
             'cost_price': float(self.cost_price) if self.cost_price is not None else None,
             'image_url': self.image_url, 'stock': self.stock,
@@ -164,7 +164,7 @@ class OrderItem(db.Model):
     __tablename__ = 'order_items'
     id = db.Column(db.Integer, primary_key=True)
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
     unit_price = db.Column(db.Numeric(10, 2), nullable=True)
     unit_cost = db.Column(db.Numeric(10, 2), nullable=True)
@@ -174,7 +174,7 @@ class OrderItem(db.Model):
     product = db.relationship('Product')
 
     def to_dict(self):
-        return {'id': self.id, 'product_id': self.product_id,
+        return {'id': self.id, 'product_id': str(self.product_id) if self.product_id is not None else None,
                 'quantity': self.quantity,
                 'unit_price': float(self.unit_price) if self.unit_price is not None else None,
                 'unit_cost': float(self.unit_cost) if self.unit_cost is not None else None,
@@ -196,7 +196,7 @@ class Chat(db.Model):
     text = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     # Product inquiry context
-    product_id = db.Column(db.Integer, nullable=True)
+    product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=True)
     product_title = db.Column(db.String(200), nullable=True)
     product_price = db.Column(db.Float, nullable=True)
     product_image = db.Column(db.String(500), nullable=True)
@@ -205,7 +205,7 @@ class Chat(db.Model):
         return {
             'id': self.id, 'user_id': str(self.user_id) if self.user_id is not None else None, 'sender': self.sender,
             'text': self.text, 'timestamp': self.timestamp.isoformat(),
-            'product_id': self.product_id, 'product_title': self.product_title,
+            'product_id': str(self.product_id) if self.product_id is not None else None, 'product_title': self.product_title,
             'product_price': self.product_price, 'product_image': self.product_image,
         }
 
@@ -299,13 +299,13 @@ class WishlistItem(db.Model):
     )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
+    product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     product = db.relationship('Product')
 
     def to_dict(self):
-        return {'product_id': self.product_id}
+        return {'product_id': str(self.product_id) if self.product_id is not None else None}
 
 
 class VirtualConsultation(db.Model):

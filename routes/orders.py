@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 from flask import Blueprint, request, jsonify
 from models.models import db, Order, OrderItem, Product, User
@@ -9,6 +10,13 @@ from services.email_service import send_order_confirmation_email
 
 orders_bp = Blueprint('orders', __name__)
 logger = logging.getLogger(__name__)
+
+
+def _safe_uuid(value):
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 @orders_bp.post('/orders')
@@ -39,7 +47,7 @@ def create_order():
             db.session.rollback()
             return jsonify({'message': f'Invalid order item at position {idx}'}), 400
 
-        product_id = item.get('product_id')
+        product_id = _safe_uuid(item.get('product_id'))
         quantity = item.get('quantity')
         if product_id is None or quantity is None:
             db.session.rollback()

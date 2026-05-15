@@ -39,7 +39,7 @@ def register_socket_events(socketio):
         # Resolve user_id from auth token if available
         user_id = None
         # Extract product context if provided
-        product_id = data.get('product_id')
+        product_id = _safe_uuid(data.get('product_id'))
         product_title = data.get('product_title')
         product_price = data.get('product_price')
         product_image = data.get('product_image')
@@ -79,7 +79,7 @@ def register_socket_events(socketio):
                 'user_id': str(r.user_id) if r.user_id is not None else None,
                 'user_name': r.sender,
                 'last_message': r.text,
-                'product_id': r.product_id,
+                'product_id': str(r.product_id) if r.product_id is not None else None,
                 'product_title': r.product_title,
                 'product_price': r.product_price,
                 'product_image': r.product_image,

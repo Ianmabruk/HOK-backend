@@ -1,4 +1,4 @@
--- Migration: align all users.id foreign keys to UUID for PostgreSQL/Supabase
+-- Migration: align users.id and products.id foreign keys to UUID for PostgreSQL/Supabase
 -- Safe to run multiple times.
 -- Requires pgcrypto extension for gen_random_uuid() only if fallback generation is needed.
 
@@ -28,7 +28,25 @@ BEGIN
             );
     END IF;
 
-    -- List every FK column that should match users.id UUID type.
+    -- Ensure products.id is UUID
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'products'
+          AND column_name = 'id'
+          AND data_type <> 'uuid'
+    ) THEN
+        ALTER TABLE products
+            ALTER COLUMN id TYPE uuid
+            USING (
+                CASE
+                    WHEN id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN id::text::uuid
+                    ELSE gen_random_uuid()
+                END
+            );
+    END IF;
+
+    -- List every FK column that should match users.id or products.id UUID type.
     FOR rec IN
         SELECT *
         FROM (VALUES
@@ -45,7 +63,10 @@ BEGIN
             ('appointment_bookings', 'user_id', TRUE),
             ('appointment_bookings', 'designer_id', TRUE),
             ('designer_assignments', 'designer_id', TRUE),
-            ('designer_assignments', 'assigned_by_user_id', TRUE)
+            ('designer_assignments', 'assigned_by_user_id', TRUE),
+            ('order_items', 'product_id', FALSE),
+            ('wishlist_items', 'product_id', FALSE),
+            ('chats', 'product_id', TRUE)
         ) AS t(table_name, column_name, is_nullable)
     LOOP
         IF EXISTS (

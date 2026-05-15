@@ -140,10 +140,10 @@ def get_email_logs():
 def get_wishlist():
     uid = current_user_id()
     items = WishlistItem.query.filter_by(user_id=uid).all()
-    return jsonify([i.product_id for i in items])
+    return jsonify([str(i.product_id) if i.product_id is not None else None for i in items])
 
 
-@users_bp.post('/wishlist/<int:product_id>')
+@users_bp.post('/wishlist/<uuid:product_id>')
 @jwt_required()
 def add_to_wishlist(product_id):
     uid = current_user_id()
@@ -151,16 +151,16 @@ def add_to_wishlist(product_id):
     if not existing:
         db.session.add(WishlistItem(user_id=uid, product_id=product_id))
         db.session.commit()
-    return jsonify({'product_id': product_id}), 200
+    return jsonify({'product_id': str(product_id)}), 200
 
 
-@users_bp.delete('/wishlist/<int:product_id>')
+@users_bp.delete('/wishlist/<uuid:product_id>')
 @jwt_required()
 def remove_from_wishlist(product_id):
     uid = current_user_id()
     WishlistItem.query.filter_by(user_id=uid, product_id=product_id).delete()
     db.session.commit()
-    return jsonify({'product_id': product_id}), 200
+    return jsonify({'product_id': str(product_id)}), 200
 
 
 @users_bp.put('/wishlist/sync')
@@ -169,9 +169,13 @@ def sync_wishlist():
     """Bulk-replace the user's wishlist — used on login to merge local + server."""
     uid = current_user_id()
     data = request.get_json(silent=True) or {}
-    product_ids = [int(i) for i in (data.get('product_ids') or []) if str(i).isdigit()]
+    product_ids = []
+    for raw_id in (data.get('product_ids') or []):
+        pid = _safe_uuid(raw_id)
+        if pid is not None:
+            product_ids.append(pid)
     WishlistItem.query.filter_by(user_id=uid).delete()
     for pid in product_ids:
         db.session.add(WishlistItem(user_id=uid, product_id=pid))
     db.session.commit()
-    return jsonify(product_ids), 200
+    return jsonify([str(pid) for pid in product_ids]), 200

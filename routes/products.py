@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+import uuid
 from models.models import db, Product
 from flask_jwt_extended import jwt_required
 from sqlalchemy import func, or_
@@ -8,6 +9,13 @@ from auth_utils import current_user_role
 from services.media_storage import save_media_file
 
 products_bp = Blueprint('products', __name__)
+
+
+def _safe_uuid(value):
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 def _normalize_category(value):
@@ -69,7 +77,7 @@ def get_products():
     return jsonify({'products': [p.to_dict() for p in products], 'total': total})
 
 
-@products_bp.get('/products/<int:pid>')
+@products_bp.get('/products/<uuid:pid>')
 def get_product(pid):
     p = Product.query.get_or_404(pid)
     return jsonify(p.to_dict())
@@ -94,7 +102,7 @@ def create_product():
     return jsonify(p.to_dict()), 201
 
 
-@products_bp.put('/products/<int:pid>')
+@products_bp.put('/products/<uuid:pid>')
 @jwt_required()
 def update_product(pid):
     err = admin_required()
@@ -136,7 +144,7 @@ def upload_product_media():
     return jsonify(uploaded), 201
 
 
-@products_bp.delete('/products/<int:pid>')
+@products_bp.delete('/products/<uuid:pid>')
 @jwt_required()
 def delete_product(pid):
     err = admin_required()
