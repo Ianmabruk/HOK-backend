@@ -168,7 +168,19 @@ def _bcrypt_rounds() -> int:
 
 
 def _configured_admin_email() -> str:
-    return _normalize_email(current_app.config.get("ADMIN_EMAIL") or "admin@hokinterior.com")
+    return _normalize_email(current_app.config.get("ADMIN_EMAIL") or "admin@hok.com")
+
+
+def _admin_signup_emails() -> set[str]:
+    configured = _configured_admin_email()
+    aliases = {
+        configured,
+        'admin@hok.com',
+        'admin@hokinterior.com',
+    }
+    extra_aliases = current_app.config.get('ADMIN_EMAIL_ALIASES') or ''
+    aliases.update(_normalize_email(item) for item in str(extra_aliases).split(',') if item.strip())
+    return {item for item in aliases if item}
 
 
 def _configured_admin_name() -> str:
@@ -249,7 +261,7 @@ def register():
             return jsonify({"message": "Email already registered"}), 409
 
         configured_admin_email = _configured_admin_email()
-        wants_admin_account = email == configured_admin_email
+        wants_admin_account = email in _admin_signup_emails()
         has_admin = _admin_exists()
 
         if wants_admin_account and has_admin:
@@ -280,9 +292,9 @@ def register():
 
         db.session.commit()
 
-        # Send welcome email (no verification needed - users auto-verified on signup)
         try:
-            send_welcome_email(user.email, user.name, None)
+            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+            send_welcome_email(user.email, user.name, frontend_url)
         except Exception:
             logger.warning('Welcome email failed for %s — registration still succeeded', user.email, exc_info=True)
 
@@ -293,7 +305,7 @@ def register():
             "message": (
                 f"Admin account created for {configured_admin_email}. You can now access the dashboard."
                 if role == "admin"
-                else "Welcome! Account created successfully."
+                else "Welcome! Your account has been created."
             ),
         }), 201
 
@@ -362,11 +374,7 @@ def login():
                 logger.warning('Login notice failed for %s — continuing login flow', user.email, exc_info=True)
 
         jwt_token = create_user_access_token(user)
-        return jsonify({
-            "user": _user_payload(user),
-            "token": jwt_token,
-            "message": "Welcome back!"
-        }), 200
+        return jsonify({"user": _user_payload(user), "token": jwt_token, "message": "Welcome back!"}), 200
 
     except Exception:
         db.session.rollback()
