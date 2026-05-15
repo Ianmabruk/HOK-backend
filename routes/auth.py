@@ -236,7 +236,10 @@ def register():
         db.session.commit()
 
         if verify_url:
-            send_welcome_email(user.email, user.name, verify_url)
+            try:
+                send_welcome_email(user.email, user.name, verify_url)
+            except Exception:
+                logger.warning('Welcome email failed for %s — registration still succeeded', user.email, exc_info=True)
 
         jwt_token = create_user_access_token(user)
         return jsonify({
