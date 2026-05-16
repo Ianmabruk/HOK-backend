@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 from auth_utils import current_user_role
-from services.media_storage import save_media_file
+from services.media_storage import MediaUploadError, save_media_file
 
 products_bp = Blueprint('products', __name__)
 logger = logging.getLogger(__name__)
@@ -63,6 +63,36 @@ def admin_required():
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
     return None
+
+
+@products_bp.post('/products/media-upload')
+@jwt_required()
+def upload_product_media():
+    err = admin_required()
+    if err:
+        return err
+
+    media_type = str(request.form.get('type') or 'image').strip().lower()
+    file = request.files.get('file')
+    if file is None or not file.filename:
+        return jsonify({'message': 'Missing file'}), 400
+    if media_type not in {'image', 'video'}:
+        return jsonify({'message': 'Invalid media type'}), 400
+
+    folder = request.form.get('folder') or ('products/videos' if media_type == 'video' else 'products/images')
+    try:
+        uploaded = save_media_file(file, media_type, folder=folder)
+        return jsonify({
+            'url': uploaded['url'],
+            'public_url': uploaded['url'],
+            'path': uploaded.get('public_id'),
+            'public_id': uploaded.get('public_id'),
+            'bucket': uploaded.get('bucket'),
+            'media_type': media_type,
+            'content_type': uploaded.get('content_type'),
+        }), 201
+    except MediaUploadError as exc:
+        return jsonify({'message': exc.user_message, 'error': str(exc)}), exc.status_code
 
 
 @products_bp.get('/products')
@@ -272,31 +302,6 @@ def update_product(pid):
         db.session.rollback()
         logger.exception('Failed to update product id=%s', pid)
         return jsonify({'error': 'Unexpected server error', 'message': 'Could not update product'}), 500
-
-
-@products_bp.post('/products/media-upload')
-@jwt_required()
-def upload_product_media():
-    err = admin_required()
-    if err:
-        return err
-
-    media_kind = request.form.get('type', 'image').strip().lower()
-    if media_kind not in {'image', 'video'}:
-        return jsonify({'message': 'Invalid media type'}), 400
-
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'message': 'No file uploaded'}), 400
-
-    try:
-        uploaded = save_media_file(file, media_kind)
-    except ValueError as exc:
-        return jsonify({'message': str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({'message': str(exc)}), 500
-
-    return jsonify(uploaded), 201
 
 
 @products_bp.delete('/products/<uuid:pid>')

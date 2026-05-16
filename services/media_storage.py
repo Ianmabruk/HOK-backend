@@ -21,6 +21,13 @@ VIDEO_MIME_TYPES = {'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matro
 logger = logging.getLogger(__name__)
 
 
+class MediaUploadError(RuntimeError):
+    def __init__(self, message: str, *, user_message: str | None = None, status_code: int = 500):
+        super().__init__(message)
+        self.user_message = user_message or message
+        self.status_code = status_code
+
+
 def _uploads_root() -> Path:
     configured = current_app.config.get('UPLOAD_FOLDER')
     root = Path(configured) if configured else Path(current_app.instance_path) / 'uploads'
@@ -124,8 +131,11 @@ def _upload_to_supabase_storage(file: FileStorage, kind: str, extension: str) ->
     }
 
 
-def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
-    extension = _validate_file(file, kind)
+def save_media_file(file: FileStorage, kind: str, *, folder: str | None = None) -> dict[str, str]:
+    try:
+        extension = _validate_file(file, kind)
+    except ValueError as exc:
+        raise MediaUploadError(str(exc), user_message=str(exc), status_code=400) from exc
 
     try:
         uploaded = _upload_to_supabase_storage(file, kind, extension)
@@ -139,14 +149,19 @@ def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
         try:
             import cloudinary.uploader
         except ImportError as exc:
-            raise RuntimeError('Cloudinary support is not installed') from exc
+            raise MediaUploadError(
+                'Cloudinary support is not installed',
+                user_message='Media storage is not configured on the server.',
+                status_code=500,
+            ) from exc
 
         try:
             _configure_cloudinary()
             resource_type = 'image' if kind == 'image' else 'video'
+            upload_folder = str(folder or f'hok/{kind}s').strip().strip('/')
             uploaded = cloudinary.uploader.upload(
                 file,
-                folder=f"hok/{kind}s",
+                folder=upload_folder,
                 resource_type=resource_type,
                 public_id=f"{kind}-{uuid4().hex}",
                 overwrite=True,
@@ -155,6 +170,10 @@ def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
                 'url': uploaded['secure_url'],
                 'provider': 'cloudinary',
                 'public_id': uploaded.get('public_id'),
+                'path': uploaded.get('public_id'),
+                'bucket': current_app.config.get('CLOUDINARY_CLOUD_NAME'),
+                'media_type': kind,
+                'content_type': uploaded.get('format'),
             }
         except Exception as exc:
             logger.warning('Cloudinary upload failed for %s; falling back to local storage: %s', kind, exc)
@@ -170,4 +189,8 @@ def save_media_file(file: FileStorage, kind: str) -> dict[str, str]:
         'url': _local_media_url(str(relative_dir / filename).replace(os.sep, '/')),
         'provider': 'local',
         'public_id': None,
+        'path': None,
+        'bucket': None,
+        'media_type': kind,
+        'content_type': file.mimetype or mimetypes.guess_type(file.filename or '')[0] or 'application/octet-stream',
     }

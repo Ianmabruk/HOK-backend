@@ -1,7 +1,6 @@
 import os
 import uuid
-from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO
@@ -18,6 +17,7 @@ from routes.vendors import vendors_bp
 from routes.before_after import before_after_bp
 from routes.site_settings import site_settings_bp
 from routes.portfolio import portfolio_bp
+from routes.media import media_bp
 from routes.admin_tools import admin_tools_bp
 from routes.virtual_interior_services import virtual_interior_services_bp
 from services.email_service import sendgrid_health_payload
@@ -67,6 +67,33 @@ def _ensure_order_item_columns(app):
         for statement in alterations:
             connection.execute(text(statement))
     app.logger.info('Applied lightweight order_items schema updates: %s', ', '.join(alterations))
+
+
+def _ensure_orders_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'orders' not in tables:
+        return
+
+    existing_columns = {column['name'] for column in inspector.get_columns('orders')}
+    alterations = []
+
+    if 'total_price' not in existing_columns:
+        alterations.append('ALTER TABLE orders ADD COLUMN total_price NUMERIC(10, 2) NOT NULL DEFAULT 0')
+    if 'status' not in existing_columns:
+        alterations.append("ALTER TABLE orders ADD COLUMN status VARCHAR(30) NOT NULL DEFAULT 'pending'")
+    if 'shipping_info' not in existing_columns:
+        alterations.append('ALTER TABLE orders ADD COLUMN shipping_info JSON')
+    if 'created_at' not in existing_columns:
+        alterations.append('ALTER TABLE orders ADD COLUMN created_at TIMESTAMP')
+
+    if not alterations:
+        return
+
+    with db.engine.begin() as connection:
+        for statement in alterations:
+            connection.execute(text(statement))
+    app.logger.info('Applied lightweight orders schema updates: %s', ', '.join(alterations))
 
 
 def _ensure_product_columns(app):
@@ -214,6 +241,7 @@ def create_app():
     app.register_blueprint(before_after_bp, url_prefix='/api')
     app.register_blueprint(site_settings_bp, url_prefix='/api')
     app.register_blueprint(portfolio_bp, url_prefix='/api')
+    app.register_blueprint(media_bp, url_prefix='/api')
     app.register_blueprint(admin_tools_bp, url_prefix='/api')
     app.register_blueprint(virtual_interior_services_bp, url_prefix='/api')
 
@@ -224,19 +252,13 @@ def create_app():
             db.create_all()
             _ensure_user_columns(app)
             _ensure_portfolio_columns(app)
+            _ensure_orders_columns(app)
             _ensure_order_item_columns(app)
             _ensure_product_columns(app)
             _ensure_vendor_columns(app)
             _ensure_before_after_columns(app)
         except Exception:
             app.logger.exception('Database initialization (create_all + lightweight schema updates) failed; continuing without schema sync.')
-
-    uploads_root = Path(app.config['UPLOAD_FOLDER'])
-    uploads_root.mkdir(parents=True, exist_ok=True)
-
-    @app.get('/uploads/<path:filename>')
-    def uploaded_file(filename):
-        return send_from_directory(uploads_root, filename)
 
     @app.get('/api/health/email')
     def email_health():

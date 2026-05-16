@@ -12,6 +12,7 @@ import uuid
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
+from sqlalchemy import String, cast
 
 from auth_utils import current_user_role
 from models.models import PortfolioProject, db
@@ -25,6 +26,19 @@ def _request_error_context() -> str:
     return (
         f"request_id={request_id} method={request.method} path={request.path} "
         f"remote_addr={request.remote_addr}"
+    )
+
+
+def _find_project_by_id(pid: str):
+    project_id = str(pid or '').strip()
+    if not project_id:
+        return None
+    if project_id.isdigit():
+        return db.session.get(PortfolioProject, int(project_id))
+    return (
+        PortfolioProject.query
+        .filter(cast(PortfolioProject.id, String) == project_id)
+        .first()
     )
 
 
@@ -83,12 +97,12 @@ def create_project():
     return jsonify(p.to_dict()), 201
 
 
-@portfolio_bp.put('/portfolio/<int:pid>')
+@portfolio_bp.put('/portfolio/<pid>')
 @jwt_required()
 def update_project(pid):
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
-    p = db.session.get(PortfolioProject, pid)
+    p = _find_project_by_id(pid)
     if not p:
         return jsonify({'message': 'Project not found'}), 404
     data = request.get_json(silent=True) or {}
@@ -103,12 +117,12 @@ def update_project(pid):
     return jsonify(p.to_dict()), 200
 
 
-@portfolio_bp.delete('/portfolio/<int:pid>')
+@portfolio_bp.delete('/portfolio/<pid>')
 @jwt_required()
 def delete_project(pid):
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
-    p = db.session.get(PortfolioProject, pid)
+    p = _find_project_by_id(pid)
     if not p:
         return jsonify({'message': 'Project not found'}), 404
     db.session.delete(p)
