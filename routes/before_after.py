@@ -14,7 +14,7 @@ import uuid
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
-from sqlalchemy import inspect
+from sqlalchemy import String, cast, inspect
 
 from auth_utils import current_user_role
 from models.models import BeforeAfterProject, db
@@ -50,6 +50,21 @@ def _before_after_order_exprs():
     if 'sort_order' in columns:
         return [BeforeAfterProject.sort_order, BeforeAfterProject.created_at]
     return [BeforeAfterProject.created_at.desc()]
+
+
+def _find_before_after_project(project_id: str):
+    normalized_id = str(project_id or '').strip()
+    if not normalized_id:
+        return None
+
+    if normalized_id.isdigit():
+        return db.session.get(BeforeAfterProject, int(normalized_id))
+
+    return (
+        BeforeAfterProject.query
+        .filter(cast(BeforeAfterProject.id, String) == normalized_id)
+        .first()
+    )
 
 
 @before_after_bp.get("/before-after")
@@ -113,13 +128,13 @@ def create_project():
         return jsonify({'message': 'Could not create project. Check required fields and media URLs.'}), 400
 
 
-@before_after_bp.put("/before-after/<int:project_id>")
+@before_after_bp.put("/before-after/<project_id>")
 @jwt_required()
 
 def update_project(project_id):
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
-    project = db.session.get(BeforeAfterProject, project_id)
+    project = _find_before_after_project(project_id)
     if not project:
         return jsonify({"message": "Project not found"}), 404
 
@@ -157,13 +172,13 @@ def update_project(project_id):
         return jsonify({'message': 'Could not update project. Check payload values.'}), 400
 
 
-@before_after_bp.delete("/before-after/<int:project_id>")
+@before_after_bp.delete("/before-after/<project_id>")
 @jwt_required()
 
 def delete_project(project_id):
     if current_user_role() != 'admin':
         return jsonify({'message': 'Admin only'}), 403
-    project = db.session.get(BeforeAfterProject, project_id)
+    project = _find_before_after_project(project_id)
     if not project:
         return jsonify({"message": "Project not found"}), 404
     try:
