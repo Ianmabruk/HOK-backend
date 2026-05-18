@@ -29,6 +29,28 @@ def _safe_uuid(value):
         return None
 
 
+def _extract_primary_image_url(value):
+    if not value:
+        return None
+
+    if isinstance(value, list):
+        return next((str(item).strip() for item in value if str(item).strip()), None)
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    if raw.startswith('['):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return next((str(item).strip() for item in parsed if str(item).strip()), None)
+        except Exception:
+            return raw[:255]
+
+    return raw[:255]
+
+
 def _column_type_name(table_name: str, column_name: str) -> str:
     try:
         inspector = inspect(db.engine)
@@ -118,7 +140,7 @@ def create_order():
                 unit_price=product.price,
                 unit_cost=product.cost_price if product.cost_price is not None else 0,
                 product_title=product.title,
-                product_image=product.image_url,
+                product_image=_extract_primary_image_url(product.image_url),
                 customizations=customizations_value,
             )
             db.session.add(oi)
