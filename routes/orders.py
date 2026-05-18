@@ -62,6 +62,30 @@ def _column_type_name(table_name: str, column_name: str) -> str:
     return ''
 
 
+def _table_columns(table_name: str) -> set[str]:
+    try:
+        inspector = inspect(db.engine)
+        return {str(col.get('name')) for col in inspector.get_columns(table_name)}
+    except Exception:
+        logger.warning('Could not inspect columns for %s', table_name, exc_info=True)
+        return set()
+
+
+def _as_dict(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw.startswith('{'):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                return {}
+    return {}
+
+
 @orders_bp.post('/orders')
 @jwt_required()
 def create_order():
@@ -155,20 +179,42 @@ def create_order():
             if user_id_value is None:
                 return jsonify({'message': 'Authentication error. Please sign in again.'}), 401
 
-            # Minimal, schema-tolerant order insert
+            order_cols = _table_columns('orders')
+            item_cols = _table_columns('order_items')
+
+            insert_order_cols = []
+            insert_order_vals = []
+            insert_order_params = {}
+
+            if 'user_id' in order_cols:
+                insert_order_cols.append('user_id')
+                insert_order_vals.append(':uid')
+                insert_order_params['uid'] = user_id_value
+            if 'total_price' in order_cols:
+                insert_order_cols.append('total_price')
+                insert_order_vals.append(':tp')
+                insert_order_params['tp'] = float(data.get('total_price', 0) or 0)
+            if 'status' in order_cols:
+                insert_order_cols.append('status')
+                insert_order_vals.append(':status')
+                insert_order_params['status'] = 'pending'
+            if 'shipping_info' in order_cols:
+                insert_order_cols.append('shipping_info')
+                insert_order_vals.append(':shipping_info')
+                insert_order_params['shipping_info'] = shipping_info_db_value
+            if 'created_at' in order_cols:
+                insert_order_cols.append('created_at')
+                insert_order_vals.append('NOW()')
+
+            if not insert_order_cols:
+                raise RuntimeError('orders table has no compatible insertable columns')
+
             fallback_order_id = db.session.execute(
                 text(
-                    """
-                    INSERT INTO orders (user_id, total_price, status, created_at)
-                    VALUES (:uid, :tp, :status, NOW())
-                    RETURNING id
-                    """
+                    f"INSERT INTO orders ({', '.join(insert_order_cols)}) "
+                    f"VALUES ({', '.join(insert_order_vals)}) RETURNING id"
                 ),
-                {
-                    'uid': user_id_value,
-                    'tp': float(data.get('total_price', 0) or 0),
-                    'status': 'pending',
-                },
+                insert_order_params,
             ).scalar()
 
             if fallback_order_id is None:
@@ -194,23 +240,51 @@ def create_order():
                 if not is_quote_request and product.stock is not None:
                     product.stock = max(int(product.stock) - quantity, 0)
 
-                db.session.execute(
-                    text(
-                        """
-                        INSERT INTO order_items (order_id, product_id, quantity, unit_price, unit_cost, product_title, product_image)
-                        VALUES (:oid, :pid, :qty, :unit_price, :unit_cost, :title, :image)
-                        """
-                    ),
-                    {
-                        'oid': int(fallback_order_id),
-                        'pid': str(product_id),
-                        'qty': int(quantity),
-                        'unit_price': float(product.price or 0),
-                        'unit_cost': float(product.cost_price or 0),
-                        'title': product.title,
-                        'image': _extract_primary_image_url(product.image_url),
-                    },
-                )
+                insert_item_cols = []
+                insert_item_vals = []
+                insert_item_params = {}
+
+                if 'order_id' in item_cols:
+                    insert_item_cols.append('order_id')
+                    insert_item_vals.append(':oid')
+                    insert_item_params['oid'] = int(fallback_order_id)
+                if 'product_id' in item_cols:
+                    insert_item_cols.append('product_id')
+                    insert_item_vals.append(':pid')
+                    insert_item_params['pid'] = str(product_id)
+                if 'quantity' in item_cols:
+                    insert_item_cols.append('quantity')
+                    insert_item_vals.append(':qty')
+                    insert_item_params['qty'] = int(quantity)
+                if 'unit_price' in item_cols:
+                    insert_item_cols.append('unit_price')
+                    insert_item_vals.append(':unit_price')
+                    insert_item_params['unit_price'] = float(product.price or 0)
+                if 'unit_cost' in item_cols:
+                    insert_item_cols.append('unit_cost')
+                    insert_item_vals.append(':unit_cost')
+                    insert_item_params['unit_cost'] = float(product.cost_price or 0)
+                if 'product_title' in item_cols:
+                    insert_item_cols.append('product_title')
+                    insert_item_vals.append(':title')
+                    insert_item_params['title'] = product.title
+                if 'product_image' in item_cols:
+                    insert_item_cols.append('product_image')
+                    insert_item_vals.append(':image')
+                    insert_item_params['image'] = _extract_primary_image_url(product.image_url)
+                if 'customizations' in item_cols and customizations_value is not None:
+                    insert_item_cols.append('customizations')
+                    insert_item_vals.append(':customizations')
+                    insert_item_params['customizations'] = customizations_value
+
+                if insert_item_cols:
+                    db.session.execute(
+                        text(
+                            f"INSERT INTO order_items ({', '.join(insert_item_cols)}) "
+                            f"VALUES ({', '.join(insert_item_vals)})"
+                        ),
+                        insert_item_params,
+                    )
 
             db.session.commit()
 
@@ -301,12 +375,24 @@ def get_orders():
                 {'uid': str(current_user_id())},
             ).mappings().all()
 
+        item_cols = _table_columns('order_items')
+
         payload = []
         for row in orders_rows:
+            item_select_expr = [
+                'id' if 'id' in item_cols else 'NULL AS id',
+                'product_id' if 'product_id' in item_cols else 'NULL AS product_id',
+                'quantity' if 'quantity' in item_cols else 'NULL AS quantity',
+                'unit_price' if 'unit_price' in item_cols else 'NULL AS unit_price',
+                'unit_cost' if 'unit_cost' in item_cols else 'NULL AS unit_cost',
+                'product_title' if 'product_title' in item_cols else 'NULL AS product_title',
+                'product_image' if 'product_image' in item_cols else 'NULL AS product_image',
+                'customizations' if 'customizations' in item_cols else 'NULL AS customizations',
+            ]
             item_rows = db.session.execute(
                 text(
-                    """
-                    SELECT id, product_id, quantity, unit_price, unit_cost, product_title, product_image, customizations
+                    f"""
+                    SELECT {', '.join(item_select_expr)}
                     FROM order_items
                     WHERE order_id = :oid
                     ORDER BY id ASC
@@ -326,7 +412,7 @@ def get_orders():
                 'user': None,
                 'total_price': float(row.get('total_price') or 0),
                 'status': row.get('status'),
-                'shipping_info': row.get('shipping_info') if isinstance(row.get('shipping_info'), dict) else (row.get('shipping_info') or {}),
+                'shipping_info': _as_dict(row.get('shipping_info')),
                 'created_at': created_at_value,
                 'items': [
                     {
