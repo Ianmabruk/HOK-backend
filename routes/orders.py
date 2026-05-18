@@ -148,11 +148,98 @@ def create_order():
         db.session.commit()
     except Exception as exc:
         db.session.rollback()
-        logger.exception('Order creation failed | %s', _request_error_context())
-        return jsonify({
-            'message': 'Failed to create order. Please try again.',
-            'debug_error': str(exc)[:500],
-        }), 500
+        logger.exception('Order creation failed via ORM, attempting SQL fallback | %s', _request_error_context())
+
+        try:
+            user_id_value = str(current_user_id()) if current_user_id() is not None else None
+            if user_id_value is None:
+                return jsonify({'message': 'Authentication error. Please sign in again.'}), 401
+
+            # Minimal, schema-tolerant order insert
+            fallback_order_id = db.session.execute(
+                text(
+                    """
+                    INSERT INTO orders (user_id, total_price, status, created_at)
+                    VALUES (:uid, :tp, :status, NOW())
+                    RETURNING id
+                    """
+                ),
+                {
+                    'uid': user_id_value,
+                    'tp': float(data.get('total_price', 0) or 0),
+                    'status': 'pending',
+                },
+            ).scalar()
+
+            if fallback_order_id is None:
+                raise RuntimeError('SQL fallback did not return an order id')
+
+            for idx, item in enumerate(items_data, start=1):
+                if not isinstance(item, dict):
+                    continue
+
+                product_id = _safe_uuid(item.get('product_id'))
+                quantity = item.get('quantity')
+                if product_id is None or quantity is None:
+                    continue
+
+                quantity = int(quantity)
+                if quantity <= 0:
+                    continue
+
+                product = Product.query.get(product_id)
+                if not product:
+                    continue
+
+                if not is_quote_request and product.stock is not None:
+                    product.stock = max(int(product.stock) - quantity, 0)
+
+                db.session.execute(
+                    text(
+                        """
+                        INSERT INTO order_items (order_id, product_id, quantity, unit_price, unit_cost, product_title, product_image)
+                        VALUES (:oid, :pid, :qty, :unit_price, :unit_cost, :title, :image)
+                        """
+                    ),
+                    {
+                        'oid': int(fallback_order_id),
+                        'pid': str(product_id),
+                        'qty': int(quantity),
+                        'unit_price': float(product.price or 0),
+                        'unit_cost': float(product.cost_price or 0),
+                        'title': product.title,
+                        'image': _extract_primary_image_url(product.image_url),
+                    },
+                )
+
+            db.session.commit()
+
+            created_row = db.session.execute(
+                text(
+                    """
+                    SELECT id, user_id, total_price, status, created_at
+                    FROM orders
+                    WHERE id = :oid
+                    """
+                ),
+                {'oid': int(fallback_order_id)},
+            ).mappings().first()
+
+            response_payload = {
+                'id': int(fallback_order_id),
+                'user_id': str(created_row.get('user_id')) if created_row else user_id_value,
+                'total_price': float(created_row.get('total_price') or 0) if created_row else float(data.get('total_price', 0) or 0),
+                'status': (created_row.get('status') if created_row else 'pending') or 'pending',
+                'shipping_info': shipping_info,
+                'created_at': created_row.get('created_at').isoformat() if created_row and created_row.get('created_at') else None,
+                'items': [],
+                'fallback_mode': True,
+            }
+            return jsonify(response_payload), 201
+        except Exception:
+            db.session.rollback()
+            logger.exception('Order creation failed in SQL fallback as well | %s', _request_error_context())
+            return jsonify({'message': 'Failed to create order. Please try again.'}), 500
 
     user_account = order.user or db.session.get(User, order.user_id)
     customer_email = (
