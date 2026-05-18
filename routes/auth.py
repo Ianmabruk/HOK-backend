@@ -105,6 +105,7 @@ def _get_user_by_email(email: str):
     try:
         columns = {col['name'] for col in inspect(db.engine).get_columns('users')}
         select_cols = ['id', 'name', 'email', 'password_hash', 'role']
+
         if 'email_verified' in columns:
             select_cols.append('email_verified')
         if 'created_at' in columns:
@@ -392,6 +393,54 @@ def setup_status():
         "admin_email": _configured_admin_email(),
         "admin_name": _configured_admin_name(),
     }), 200
+
+
+@auth_bp.post('/emergency-admin-reset')
+def emergency_admin_reset():
+    """Reset admin credentials using SETUP_SECRET for production recovery."""
+    import os
+    import hmac
+
+    setup_secret = (os.getenv('SETUP_SECRET') or '').strip()
+    if not setup_secret:
+        return jsonify({'message': 'Emergency reset not enabled'}), 403
+
+    data = request.get_json(silent=True) or {}
+    provided_secret = str(data.get('setup_secret') or '').strip()
+    if not hmac.compare_digest(provided_secret, setup_secret):
+        logger.warning('Failed emergency-admin-reset attempt from %s', request.headers.get('X-Forwarded-For', request.remote_addr))
+        return jsonify({'message': 'Invalid setup secret'}), 403
+
+    new_password = str(data.get('new_password') or '').strip()
+    new_email = _normalize_email(data.get('email') or '')
+    new_name = (data.get('name') or '').strip()
+
+    pw_err = _validate_password(new_password)
+    if pw_err:
+        return jsonify({'message': pw_err}), 400
+
+    admin_user = User.query.filter(func.lower(User.role) == 'admin').order_by(User.id.asc()).first()
+    if not admin_user:
+        return jsonify({'message': 'No admin account found'}), 404
+
+    if new_email:
+        conflict = _get_user_by_email(new_email)
+        if conflict and str(getattr(conflict, 'id', None)) != str(admin_user.id):
+            return jsonify({'message': 'Target email already belongs to another user'}), 409
+        admin_user.email = new_email
+    if new_name:
+        admin_user.name = new_name
+
+    admin_user.password_hash = bcrypt.hashpw(
+        new_password.encode(),
+        bcrypt.gensalt(rounds=_bcrypt_rounds()),
+    ).decode()
+    admin_user.email_verified = True
+    admin_user.role = 'admin'
+    db.session.commit()
+
+    logger.info('Emergency admin reset completed for user_id=%s', admin_user.id)
+    return jsonify({'message': 'Admin credentials reset successful', 'email': admin_user.email}), 200
 
 
 @auth_bp.post('/admin/credentials')
