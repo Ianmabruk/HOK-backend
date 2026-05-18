@@ -1,8 +1,9 @@
 import logging
 import uuid
+import json
 
 from flask import Blueprint, request, jsonify
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from models.models import db, Order, OrderItem, Product, User
 from flask_jwt_extended import jwt_required
 
@@ -28,6 +29,17 @@ def _safe_uuid(value):
         return None
 
 
+def _column_type_name(table_name: str, column_name: str) -> str:
+    try:
+        inspector = inspect(db.engine)
+        for column in inspector.get_columns(table_name):
+            if column.get('name') == column_name:
+                return str(column.get('type')).lower()
+    except Exception:
+        logger.warning('Could not inspect schema for %s.%s', table_name, column_name, exc_info=True)
+    return ''
+
+
 @orders_bp.post('/orders')
 @jwt_required()
 def create_order():
@@ -39,63 +51,83 @@ def create_order():
     shipping_info = data.get('shipping_info', {})
     if not isinstance(shipping_info, dict):
         shipping_info = {}
+
     payment_method = str(shipping_info.get('payment_method') or '').strip().lower()
     is_quote_request = payment_method == 'quote'
 
-    order = Order(
-        user_id=current_user_id(),
-        total_price=data.get('total_price', 0),
-        status='quote_requested' if is_quote_request else 'pending',
-        shipping_info=shipping_info,
-    )
-    db.session.add(order)
-    db.session.flush()
+    # Some legacy deployments have shipping_info/customizations as TEXT rather than JSON.
+    # Detect and serialize values to avoid JSON type cast failures at INSERT time.
+    shipping_info_db_value = shipping_info
+    shipping_col_type = _column_type_name('orders', 'shipping_info')
+    if shipping_col_type and 'json' not in shipping_col_type:
+        shipping_info_db_value = json.dumps(shipping_info)
 
-    for idx, item in enumerate(items_data, start=1):
-        if not isinstance(item, dict):
-            db.session.rollback()
-            return jsonify({'message': f'Invalid order item at position {idx}'}), 400
+    customizations_col_type = _column_type_name('order_items', 'customizations')
 
-        product_id = _safe_uuid(item.get('product_id'))
-        quantity = item.get('quantity')
-        if product_id is None or quantity is None:
-            db.session.rollback()
-            return jsonify({'message': f'Order item #{idx} is missing product_id or quantity'}), 400
-
-        try:
-            quantity = int(quantity)
-        except (TypeError, ValueError):
-            db.session.rollback()
-            return jsonify({'message': f'Order item #{idx} has invalid quantity'}), 400
-
-        if quantity <= 0:
-            db.session.rollback()
-            return jsonify({'message': f'Order item #{idx} quantity must be at least 1'}), 400
-
-        product = Product.query.get(product_id)
-        if not product:
-            db.session.rollback()
-            return jsonify({'message': f'Product {product_id} not found'}), 400
-        if not is_quote_request and product.stock < quantity:
-            db.session.rollback()
-            return jsonify({'message': f'Insufficient stock for product {product_id}'}), 400
-
-        if not is_quote_request:
-            product.stock -= quantity
-
-        oi = OrderItem(
-            order_id=order.id,
-            product_id=product_id,
-            quantity=quantity,
-            unit_price=product.price,
-            unit_cost=product.cost_price,
-            product_title=product.title,
-            product_image=product.image_url,
-            customizations=item.get('customizations') if isinstance(item, dict) else None,
+    try:
+        order = Order(
+            user_id=current_user_id(),
+            total_price=float(data.get('total_price', 0) or 0),
+            # Keep universal status for maximum DB compatibility; quote intent stays in payment_method.
+            status='pending',
+            shipping_info=shipping_info_db_value,
         )
-        db.session.add(oi)
+        db.session.add(order)
+        db.session.flush()
 
-    db.session.commit()
+        for idx, item in enumerate(items_data, start=1):
+            if not isinstance(item, dict):
+                db.session.rollback()
+                return jsonify({'message': f'Invalid order item at position {idx}'}), 400
+
+            product_id = _safe_uuid(item.get('product_id'))
+            quantity = item.get('quantity')
+            if product_id is None or quantity is None:
+                db.session.rollback()
+                return jsonify({'message': f'Order item #{idx} is missing product_id or quantity'}), 400
+
+            try:
+                quantity = int(quantity)
+            except (TypeError, ValueError):
+                db.session.rollback()
+                return jsonify({'message': f'Order item #{idx} has invalid quantity'}), 400
+
+            if quantity <= 0:
+                db.session.rollback()
+                return jsonify({'message': f'Order item #{idx} quantity must be at least 1'}), 400
+
+            product = Product.query.get(product_id)
+            if not product:
+                db.session.rollback()
+                return jsonify({'message': f'Product {product_id} not found'}), 400
+            if not is_quote_request and product.stock < quantity:
+                db.session.rollback()
+                return jsonify({'message': f'Insufficient stock for product {product_id}'}), 400
+
+            if not is_quote_request:
+                product.stock -= quantity
+
+            customizations_value = item.get('customizations') if isinstance(item, dict) else None
+            if customizations_col_type and 'json' not in customizations_col_type and customizations_value is not None:
+                customizations_value = json.dumps(customizations_value)
+
+            oi = OrderItem(
+                order_id=order.id,
+                product_id=product_id,
+                quantity=quantity,
+                unit_price=product.price,
+                unit_cost=product.cost_price if product.cost_price is not None else 0,
+                product_title=product.title,
+                product_image=product.image_url,
+                customizations=customizations_value,
+            )
+            db.session.add(oi)
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.exception('Order creation failed | %s', _request_error_context())
+        return jsonify({'message': 'Failed to create order. Please try again.'}), 500
 
     user_account = order.user or db.session.get(User, order.user_id)
     customer_email = (
