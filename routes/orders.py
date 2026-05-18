@@ -146,10 +146,13 @@ def create_order():
             db.session.add(oi)
 
         db.session.commit()
-    except Exception:
+    except Exception as exc:
         db.session.rollback()
         logger.exception('Order creation failed | %s', _request_error_context())
-        return jsonify({'message': 'Failed to create order. Please try again.'}), 500
+        return jsonify({
+            'message': 'Failed to create order. Please try again.',
+            'debug_error': str(exc)[:500],
+        }), 500
 
     user_account = order.user or db.session.get(User, order.user_id)
     customer_email = (
