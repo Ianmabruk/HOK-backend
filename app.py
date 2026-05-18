@@ -1,14 +1,15 @@
 import os
 import uuid
+import bcrypt
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, func
 from werkzeug.exceptions import HTTPException
 
 from config.config import Config
-from models.models import db
+from models.models import db, User
 from routes.auth import auth_bp
 from routes.products import products_bp
 from routes.orders import orders_bp
@@ -220,6 +221,37 @@ def _ensure_portfolio_columns(app):
     app.logger.info('Applied lightweight portfolio schema updates: %s', ', '.join(alterations))
 
 
+def _hard_reset_admin_credentials(app):
+    """Force-reset admin credentials on startup for recovery scenarios."""
+    admin_email = 'admin@hokinterior.com'
+    admin_password = 'Admin@1234'
+    admin_name = 'Admin'
+
+    existing_admin = User.query.filter(func.lower(User.role) == 'admin').order_by(User.id.asc()).first()
+    hashed = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt(rounds=11)).decode()
+
+    if existing_admin:
+        existing_admin.email = admin_email
+        existing_admin.password_hash = hashed
+        existing_admin.name = admin_name
+        existing_admin.role = 'admin'
+        existing_admin.email_verified = True
+        db.session.commit()
+        app.logger.warning('Hard reset applied to existing admin account: %s', admin_email)
+        return
+
+    admin = User(
+        name=admin_name,
+        email=admin_email,
+        password_hash=hashed,
+        role='admin',
+        email_verified=True,
+    )
+    db.session.add(admin)
+    db.session.commit()
+    app.logger.warning('Hard reset created admin account: %s', admin_email)
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -257,6 +289,7 @@ def create_app():
             _ensure_product_columns(app)
             _ensure_vendor_columns(app)
             _ensure_before_after_columns(app)
+            _hard_reset_admin_credentials(app)
         except Exception:
             app.logger.exception('Database initialization (create_all + lightweight schema updates) failed; continuing without schema sync.')
 
