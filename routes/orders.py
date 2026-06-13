@@ -87,8 +87,8 @@ def _as_dict(value):
 
 
 @orders_bp.post('/orders')
-@jwt_required()
 def create_order():
+    """Create order - allows guest checkout (no authentication required)."""
     data = request.get_json() or {}
     items_data = data.get('items', [])
     if not items_data:
@@ -110,9 +110,16 @@ def create_order():
 
     customizations_col_type = _column_type_name('order_items', 'customizations')
 
+    # Get optional user_id from JWT if authenticated, otherwise set to None (guest order)
+    user_id = None
+    try:
+        user_id = current_user_id()
+    except Exception:
+        pass  # Guest checkout allowed
+
     try:
         order = Order(
-            user_id=current_user_id(),
+            user_id=user_id,
             total_price=float(data.get('total_price', 0) or 0),
             # Keep universal status for maximum DB compatibility; quote intent stays in payment_method.
             status='pending',
@@ -175,9 +182,11 @@ def create_order():
         logger.exception('Order creation failed via ORM, attempting SQL fallback | %s', _request_error_context())
 
         try:
-            user_id_value = str(current_user_id()) if current_user_id() is not None else None
+            user_id_value = str(user_id) if user_id is not None else None
             if user_id_value is None:
-                return jsonify({'message': 'Authentication error. Please sign in again.'}), 401
+                user_id_value = 'guest'  # Allow guest orders
+            if not user_id_value:
+                user_id_value = 'guest'
 
             order_cols = _table_columns('orders')
             item_cols = _table_columns('order_items')
@@ -239,6 +248,11 @@ def create_order():
 
                 if not is_quote_request and product.stock is not None:
                     product.stock = max(int(product.stock) - quantity, 0)
+
+                # Handle customizations in fallback mode
+                customizations_value = item.get('customizations') if isinstance(item, dict) else None
+                if customizations_col_type and 'json' not in customizations_col_type and customizations_value is not None:
+                    customizations_value = json.dumps(customizations_value)
 
                 insert_item_cols = []
                 insert_item_vals = []

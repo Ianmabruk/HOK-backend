@@ -14,6 +14,7 @@ class User(db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='customer')
+    status = db.Column(db.String(20), default='active')
     email_verified = db.Column(db.Boolean, default=False, nullable=False)
     last_login_ip = db.Column(db.String(45))          # max 45 chars covers IPv6
     last_login_at = db.Column(db.DateTime, nullable=True)
@@ -25,6 +26,7 @@ class User(db.Model):
             'name': self.name,
             'email': self.email,
             'role': self.role,
+            'status': self.status,
             'email_verified': self.email_verified,
             'last_login_ip': self.last_login_ip,
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
@@ -109,27 +111,102 @@ class Product(db.Model):
         db.Index('ix_products_category', 'category'),
         db.Index('ix_products_created_at', 'created_at'),
         db.Index('ix_products_price', 'price'),
+        db.Index('ix_products_status', 'status'),
+        db.Index('ix_products_featured', 'featured'),
+        db.Index('ix_products_trending', 'trending'),
     )
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     price = db.Column(db.Numeric(10, 2), nullable=False)
     cost_price = db.Column(db.Numeric(10, 2), nullable=True)
+    display_price = db.Column(db.Numeric(10, 2), nullable=True)
+    price_usd = db.Column(db.Numeric(10, 2), nullable=True)
+    base_currency = db.Column(db.String(8), default='USD')
+    sku = db.Column(db.String(120))
+    status = db.Column(db.String(30), default='in-stock')
     video_url = db.Column(db.Text)
     image_url = db.Column(db.Text)
     stock = db.Column(db.Integer, default=0)
     category = db.Column(db.String(80))
+    subcategory = db.Column(db.String(120))
     vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.id'), nullable=True)
+    featured = db.Column(db.Boolean, default=False, nullable=False)
+    trending = db.Column(db.Boolean, default=False, nullable=False)
+    tags = db.Column(db.JSON, nullable=True)
+    material_type = db.Column(db.String(120))
+    color_theme = db.Column(db.String(120))
+    dimensions = db.Column(db.String(160))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    variants = db.relationship('ProductVariant', backref='product', lazy=True, cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
-            'id': str(self.id) if self.id is not None else None, 'title': self.title, 'description': self.description,
-            'price': float(self.price), 'video_url': self.video_url,
+            'id': str(self.id) if self.id is not None else None,
+            'title': self.title,
+            'description': self.description,
+            'price': float(self.price),
             'cost_price': float(self.cost_price) if self.cost_price is not None else None,
-            'image_url': self.image_url, 'stock': self.stock,
-            'category': self.category, 'vendor_id': self.vendor_id,
-            'created_at': self.created_at.isoformat()
+            'display_price': float(self.display_price) if self.display_price is not None else None,
+            'price_usd': float(self.price_usd) if self.price_usd is not None else None,
+            'base_currency': self.base_currency or 'USD',
+            'sku': self.sku,
+            'status': self.status,
+            'video_url': self.video_url,
+            'image_url': self.image_url,
+            'stock': self.stock,
+            'category': self.category,
+            'subcategory': self.subcategory,
+            'vendor_id': self.vendor_id,
+            'featured': self.featured,
+            'trending': self.trending,
+            'tags': self.tags or [],
+            'material_type': self.material_type,
+            'color_theme': self.color_theme,
+            'dimensions': self.dimensions,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'variants': [variant.to_dict() for variant in self.variants],
+        }
+
+
+class ProductVariant(db.Model):
+    __tablename__ = 'product_variants'
+    __table_args__ = (
+        db.Index('ix_product_variants_product_id', 'product_id'),
+        db.Index('ix_product_variants_color_name', 'color_name'),
+        db.Index('ix_product_variants_active_status', 'active_status'),
+        db.Index('ix_product_variants_sort_order', 'sort_order'),
+    )
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
+    color_name = db.Column(db.String(120), nullable=False)
+    hex_color = db.Column(db.String(24), nullable=False, default='#000000')
+    image_url = db.Column(db.Text)
+    price_override = db.Column(db.Numeric(10, 2), nullable=True)
+    stock_quantity = db.Column(db.Integer, default=0, nullable=False)
+    active_status = db.Column(db.Boolean, default=True, nullable=False)
+    is_default = db.Column(db.Boolean, default=False, nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    variant_sku = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': str(self.id) if self.id is not None else None,
+            'productId': str(self.product_id) if self.product_id is not None else None,
+            'colorName': self.color_name,
+            'hexColor': self.hex_color,
+            'imageUrl': self.image_url,
+            'priceOverride': float(self.price_override) if self.price_override is not None else None,
+            'stockQuantity': self.stock_quantity,
+            'activeStatus': self.active_status,
+            'isDefault': self.is_default,
+            'sortOrder': self.sort_order,
+            'variantSku': self.variant_sku,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -212,6 +289,11 @@ class Chat(db.Model):
 
 class PortfolioProject(db.Model):
     __tablename__ = 'portfolio_projects'
+    __table_args__ = (
+        db.Index('ix_portfolio_projects_created_at', 'created_at'),
+        db.Index('ix_portfolio_projects_room_type', 'room_type'),
+        db.Index('ix_portfolio_projects_published', 'is_published'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     summary = db.Column(db.String(400))
@@ -220,6 +302,10 @@ class PortfolioProject(db.Model):
     video_url = db.Column(db.Text)
     room_type = db.Column(db.String(80))
     style = db.Column(db.String(80))
+    category = db.Column(db.String(80))
+    status = db.Column(db.String(30), default='completed')
+    completion_date = db.Column(db.String(30))
+    testimonials = db.Column(db.JSON, nullable=True)
     year = db.Column(db.String(10))
     location = db.Column(db.String(120))
     sort_order = db.Column(db.Integer, default=0)
@@ -236,11 +322,15 @@ class PortfolioProject(db.Model):
             'video_url': self.video_url,
             'room_type': self.room_type,
             'style': self.style,
+            'category': self.category,
+            'status': self.status,
+            'completion_date': self.completion_date,
+            'testimonials': self.testimonials or [],
             'year': self.year,
             'location': self.location,
             'sort_order': self.sort_order,
             'is_published': self.is_published,
-            'created_at': self.created_at.isoformat(),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 
@@ -306,6 +396,36 @@ class WishlistItem(db.Model):
 
     def to_dict(self):
         return {'product_id': str(self.product_id) if self.product_id is not None else None}
+
+
+class EmailTemplate(db.Model):
+    """Reusable email templates for admin sending."""
+    __tablename__ = 'email_templates'
+    __table_args__ = (
+        db.Index('ix_email_templates_key', 'template_key'),
+        db.Index('ix_email_templates_created_at', 'created_at'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    template_key = db.Column(db.String(120), unique=True, nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'template_key': self.template_key,
+            'name': self.name,
+            'subject': self.subject,
+            'body': self.body,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
 
 
 class VirtualConsultation(db.Model):
@@ -402,6 +522,8 @@ class VirtualProject(db.Model):
         db.Index('ix_virtual_projects_consultation_id', 'consultation_id'),
         db.Index('ix_virtual_projects_status', 'status'),
         db.Index('ix_virtual_projects_archived', 'is_archived'),
+        db.Index('ix_virtual_projects_published', 'is_published'),
+        db.Index('ix_virtual_projects_created_at', 'created_at'),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -409,11 +531,25 @@ class VirtualProject(db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     design_style = db.Column(db.String(120), nullable=True)
+    thumbnail = db.Column(db.Text, nullable=True)
+    gallery = db.Column(db.JSON, nullable=True)
+    video_url = db.Column(db.Text, nullable=True)
+    video_thumbnail = db.Column(db.Text, nullable=True)
+    before_image_url = db.Column(db.Text, nullable=True)
+    after_image_url = db.Column(db.Text, nullable=True)
+    designer = db.Column(db.String(120), nullable=True)
+    date = db.Column(db.String(20), nullable=True)
+    featured = db.Column(db.Boolean, default=False, nullable=False)
+    tags = db.Column(db.JSON, nullable=True)
+    ai_tags = db.Column(db.JSON, nullable=True)
+    views = db.Column(db.Integer, default=0, nullable=False)
+    favorites = db.Column(db.Integer, default=0, nullable=False)
     status = db.Column(db.String(40), default='planning', nullable=False)
     progress_percent = db.Column(db.Integer, default=0, nullable=False)
     milestones = db.Column(db.JSON, nullable=True)
     assigned_designer_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
+    is_published = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -427,11 +563,39 @@ class VirtualProject(db.Model):
             'title': self.title,
             'description': self.description,
             'design_style': self.design_style,
+            'category': self.design_style or 'Virtual interior',
+            'thumbnail': self.thumbnail,
+            'gallery': self.gallery or [],
+            'videoUrl': self.video_url,
+            'video_url': self.video_url,
+            'videoThumbnail': self.video_thumbnail,
+            'video_thumbnail': self.video_thumbnail,
+            'beforeImage': self.before_image_url,
+            'before_image_url': self.before_image_url,
+            'afterImage': self.after_image_url,
+            'after_image_url': self.after_image_url,
+            'designer': self.designer,
+            'date': self.date,
+            'featured': self.featured,
+            'tags': self.tags or [],
+            'aiTags': self.ai_tags or [],
+            'ai_tags': self.ai_tags or [],
+            'analytics': {
+                'views': self.views or 0,
+                'favorites': self.favorites or 0,
+                'shares': 0,
+            },
+            'views': self.views or 0,
+            'favorites': self.favorites or 0,
             'status': self.status,
             'progress_percent': self.progress_percent,
             'milestones': self.milestones or [],
             'assigned_designer_id': str(self.assigned_designer_id) if self.assigned_designer_id is not None else None,
             'is_archived': self.is_archived,
+            'is_published': self.is_published,
+            'published': self.is_published,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

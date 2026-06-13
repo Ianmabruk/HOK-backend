@@ -9,7 +9,7 @@ from sqlalchemy import inspect, text, func
 from werkzeug.exceptions import HTTPException
 
 from config.config import Config
-from models.models import db, User
+from models.models import db
 from routes.auth import auth_bp
 from routes.products import products_bp
 from routes.orders import orders_bp
@@ -103,10 +103,39 @@ def _ensure_product_columns(app):
     if 'products' not in tables:
         return
     existing = {c['name'] for c in inspector.get_columns('products')}
-    if 'cost_price' not in existing:
+    alterations = []
+    product_columns = {
+        'display_price': 'NUMERIC(10, 2)',
+        'price_usd': 'NUMERIC(10, 2)',
+        'base_currency': 'VARCHAR(8)',
+        'sku': 'VARCHAR(120)',
+        'status': "VARCHAR(30) NOT NULL DEFAULT 'in-stock'",
+        'subcategory': 'VARCHAR(120)',
+        'featured': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'trending': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'tags': 'JSON',
+        'material_type': 'VARCHAR(120)',
+        'color_theme': 'VARCHAR(120)',
+        'dimensions': 'VARCHAR(160)',
+    }
+    for name, definition in product_columns.items():
+        if name not in existing:
+            alterations.append(f'ALTER TABLE products ADD COLUMN {name} {definition}')
+    if alterations:
         with db.engine.begin() as conn:
-            conn.execute(text('ALTER TABLE products ADD COLUMN cost_price NUMERIC(10, 2)'))
-        app.logger.info('Added cost_price column to products')
+            for statement in alterations:
+                conn.execute(text(statement))
+        app.logger.info('Applied lightweight products schema updates: %s', ', '.join(alterations))
+    with db.engine.begin() as conn:
+        for statement in (
+            'CREATE INDEX IF NOT EXISTS ix_products_status ON products (status)',
+            'CREATE INDEX IF NOT EXISTS ix_products_featured ON products (featured)',
+            'CREATE INDEX IF NOT EXISTS ix_products_trending ON products (trending)',
+        ):
+            try:
+                conn.execute(text(statement))
+            except Exception:
+                conn.rollback()
 
 
 def _ensure_vendor_columns(app):
@@ -174,16 +203,48 @@ def _ensure_user_columns(app):
         return
     existing = {c['name'] for c in inspector.get_columns('users')}
     alterations = []
-    if 'last_login_at' not in existing:
-        alterations.append('ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP')
-    if 'last_login_ip' not in existing:
-        alterations.append('ALTER TABLE users ADD COLUMN last_login_ip VARCHAR(45)')
+    user_columns = {
+        'name': 'VARCHAR(120) NOT NULL DEFAULT \'Admin\'',
+        'email': 'VARCHAR(255) NOT NULL DEFAULT \'admin@hokinterior.com\'',
+        'password_hash': 'VARCHAR(255) NOT NULL DEFAULT \'\'',
+        'role': "VARCHAR(20) NOT NULL DEFAULT 'customer'",
+        'status': "VARCHAR(20) NOT NULL DEFAULT 'active'",
+        'email_verified': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'last_login_at': 'TIMESTAMP',
+        'last_login_ip': 'VARCHAR(45)',
+    }
+    for name, definition in user_columns.items():
+        if name not in existing:
+            alterations.append(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     if not alterations:
         return
     with db.engine.begin() as conn:
         for statement in alterations:
             conn.execute(text(statement))
     app.logger.info('Applied lightweight users schema updates: %s', ', '.join(alterations))
+
+
+def _ensure_email_templates_table(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'email_templates' in tables:
+        return
+    with db.engine.begin() as conn:
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS email_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_key VARCHAR(120) NOT NULL UNIQUE,
+                name VARCHAR(200) NOT NULL,
+                subject VARCHAR(255) NOT NULL,
+                body TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_email_templates_key ON email_templates (template_key)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_email_templates_created_at ON email_templates (created_at)'))
+    app.logger.info('Created email_templates table')
 
 
 def _ensure_portfolio_columns(app):
@@ -193,32 +254,85 @@ def _ensure_portfolio_columns(app):
         return
     existing = {c['name'] for c in inspector.get_columns('portfolio_projects')}
     alterations = []
-    if 'summary' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN summary VARCHAR(400)')
-    if 'description' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN description TEXT')
-    if 'image_url' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN image_url TEXT')
-    if 'video_url' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN video_url TEXT')
-    if 'room_type' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN room_type VARCHAR(80)')
-    if 'style' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN style VARCHAR(80)')
-    if 'year' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN year VARCHAR(10)')
-    if 'location' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN location VARCHAR(120)')
-    if 'sort_order' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
-    if 'is_published' not in existing:
-        alterations.append('ALTER TABLE portfolio_projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT TRUE')
+    portfolio_columns = {
+        'summary': 'VARCHAR(400)',
+        'description': 'TEXT',
+        'image_url': 'TEXT',
+        'video_url': 'TEXT',
+        'room_type': 'VARCHAR(80)',
+        'style': 'VARCHAR(80)',
+        'category': 'VARCHAR(80)',
+        'status': "VARCHAR(30) NOT NULL DEFAULT 'completed'",
+        'completion_date': 'VARCHAR(30)',
+        'testimonials': 'JSON',
+        'year': 'VARCHAR(10)',
+        'location': 'VARCHAR(120)',
+        'sort_order': 'INTEGER NOT NULL DEFAULT 0',
+        'is_published': 'BOOLEAN NOT NULL DEFAULT TRUE',
+    }
+    for name, definition in portfolio_columns.items():
+        if name not in existing:
+            alterations.append(f'ALTER TABLE portfolio_projects ADD COLUMN {name} {definition}')
     if not alterations:
         return
     with db.engine.begin() as conn:
         for statement in alterations:
             conn.execute(text(statement))
     app.logger.info('Applied lightweight portfolio schema updates: %s', ', '.join(alterations))
+    with db.engine.begin() as conn:
+        for statement in (
+            'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_created_at ON portfolio_projects (created_at)',
+            'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_room_type ON portfolio_projects (room_type)',
+            'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_published ON portfolio_projects (is_published)',
+        ):
+            try:
+                conn.execute(text(statement))
+            except Exception:
+                conn.rollback()
+
+
+def _ensure_virtual_project_columns(app):
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if 'virtual_projects' not in tables:
+        return
+    existing = {c['name'] for c in inspector.get_columns('virtual_projects')}
+    alterations = []
+    virtual_project_columns = {
+        'thumbnail': 'TEXT',
+        'gallery': 'JSON',
+        'video_url': 'TEXT',
+        'video_thumbnail': 'TEXT',
+        'before_image_url': 'TEXT',
+        'after_image_url': 'TEXT',
+        'designer': 'VARCHAR(120)',
+        'date': 'VARCHAR(20)',
+        'featured': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'tags': 'JSON',
+        'ai_tags': 'JSON',
+        'views': 'INTEGER NOT NULL DEFAULT 0',
+        'favorites': 'INTEGER NOT NULL DEFAULT 0',
+        'is_published': 'BOOLEAN NOT NULL DEFAULT FALSE',
+    }
+    for name, definition in virtual_project_columns.items():
+        if name not in existing:
+            alterations.append(f'ALTER TABLE virtual_projects ADD COLUMN {name} {definition}')
+    if not alterations:
+        return
+    with db.engine.begin() as conn:
+        for statement in alterations:
+            conn.execute(text(statement))
+    app.logger.info('Applied lightweight virtual project schema updates: %s', ', '.join(alterations))
+    with db.engine.begin() as conn:
+        for statement in (
+            'CREATE INDEX IF NOT EXISTS ix_virtual_projects_published ON virtual_projects (is_published)',
+            'CREATE INDEX IF NOT EXISTS ix_virtual_projects_created_at ON virtual_projects (created_at)',
+            'CREATE INDEX IF NOT EXISTS ix_virtual_projects_archived ON virtual_projects (is_archived)',
+        ):
+            try:
+                conn.execute(text(statement))
+            except Exception:
+                conn.rollback()
 
 
 def _hard_reset_admin_credentials(app):
@@ -226,30 +340,47 @@ def _hard_reset_admin_credentials(app):
     admin_email = 'admin@hokinterior.com'
     admin_password = 'Admin@1234'
     admin_name = 'Admin'
-
-    existing_admin = User.query.filter(func.lower(User.role) == 'admin').order_by(User.id.asc()).first()
     hashed = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt(rounds=11)).decode()
 
-    if existing_admin:
-        existing_admin.email = admin_email
-        existing_admin.password_hash = hashed
-        existing_admin.name = admin_name
-        existing_admin.role = 'admin'
-        existing_admin.email_verified = True
-        db.session.commit()
-        app.logger.warning('Hard reset applied to existing admin account: %s', admin_email)
+    tables = inspect(db.engine).get_table_names()
+    if 'users' not in tables:
         return
 
-    admin = User(
-        name=admin_name,
-        email=admin_email,
-        password_hash=hashed,
-        role='admin',
-        email_verified=True,
-    )
-    db.session.add(admin)
-    db.session.commit()
-    app.logger.warning('Hard reset created admin account: %s', admin_email)
+    try:
+        existing = db.session.execute(text('SELECT id, email, password_hash, role FROM users ORDER BY id ASC LIMIT 1')).mappings().first()
+    except Exception:
+        app.logger.exception('Unable to inspect users table for admin reset')
+        return
+
+    try:
+        if existing:
+            db.session.execute(
+                text('UPDATE users SET name = :name, email = :email, password_hash = :password_hash, role = :role, email_verified = :email_verified WHERE id = :id'),
+                {
+                    'id': existing['id'],
+                    'name': admin_name,
+                    'email': admin_email,
+                    'password_hash': hashed,
+                    'role': 'admin',
+                    'email_verified': True,
+                },
+            )
+        else:
+            db.session.execute(
+                text('INSERT INTO users (name, email, password_hash, role, email_verified) VALUES (:name, :email, :password_hash, :role, :email_verified)'),
+                {
+                    'name': admin_name,
+                    'email': admin_email,
+                    'password_hash': hashed,
+                    'role': 'admin',
+                    'email_verified': True,
+                },
+            )
+        db.session.commit()
+        app.logger.warning('Admin credentials reset: %s', admin_email)
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Failed to reset admin credentials')
 
 
 def create_app():
@@ -283,7 +414,9 @@ def create_app():
         try:
             db.create_all()
             _ensure_user_columns(app)
+            _ensure_email_templates_table(app)
             _ensure_portfolio_columns(app)
+            _ensure_virtual_project_columns(app)
             _ensure_orders_columns(app)
             _ensure_order_item_columns(app)
             _ensure_product_columns(app)

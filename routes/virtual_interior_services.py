@@ -17,14 +17,13 @@ from models.models import (
     VirtualProject,
     db,
 )
-from services.media_storage import save_media_file
 
 virtual_interior_services_bp = Blueprint('virtual_interior_services', __name__)
 
 
 CONSULTATION_STATUSES = {'pending', 'approved', 'in_progress', 'completed', 'rejected'}
 BOOKING_STATUSES = {'scheduled', 'confirmed', 'completed', 'cancelled'}
-PROJECT_STATUSES = {'planning', 'concept', 'review', 'finalizing', 'completed', 'archived'}
+PROJECT_STATUSES = {'planning', 'concept', 'review', 'finalizing', 'published', 'completed', 'archived'}
 
 
 def _admin_required_response():
@@ -58,6 +57,23 @@ def _safe_bool(value, default=False):
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _safe_json_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = __import__('json').loads(text)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
 
 
 def _safe_uuid(value):
@@ -132,6 +148,42 @@ def public_virtual_inspiration():
     return _paginated_response(query, lambda item: item.to_dict(), page, limit)
 
 
+@virtual_interior_services_bp.get('/projects/stats')
+def public_projects_stats():
+    """Get project statistics for dashboard."""
+    try:
+        total = VirtualProject.query.filter(
+            VirtualProject.is_published.isnot(False),
+            VirtualProject.is_archived.isnot(True),
+        ).count()
+        return jsonify({ 'total': total })
+    except Exception:
+        return jsonify({ 'total': 0 })
+
+
+@virtual_interior_services_bp.get('/projects')
+def public_projects():
+    """Public endpoint for homepage hero videos - returns VirtualProject data."""
+    page, limit = _pagination(default_limit=20, max_limit=100)
+    query = VirtualProject.query.filter(
+        VirtualProject.is_published.isnot(False),
+        VirtualProject.is_archived.isnot(True),
+    )
+    query = query.order_by(VirtualProject.created_at.desc())
+    return _paginated_response(query, lambda item: item.to_dict(), page, limit)
+
+
+@virtual_interior_services_bp.get('/virtual-interior/projects')
+def public_virtual_projects():
+    page, limit = _pagination(default_limit=20, max_limit=100)
+    query = VirtualProject.query.filter(
+        VirtualProject.is_published.isnot(False),
+        VirtualProject.is_archived.isnot(True),
+    )
+    query = query.order_by(VirtualProject.created_at.desc())
+    return _paginated_response(query, lambda item: item.to_dict(), page, limit)
+
+
 @virtual_interior_services_bp.get('/virtual-interior/previews')
 def public_virtual_previews():
     page, limit = _pagination(default_limit=12)
@@ -184,30 +236,25 @@ def upload_virtual_consultation_media(consultation_id):
     if not consultation:
         return jsonify({'message': 'Consultation not found'}), 404
 
-    media_kind = _safe_text(request.form.get('type', 'image'), max_len=20).lower()
+    data = request.get_json(silent=True) or {}
+
+    media_kind = _safe_text(data.get('type', 'image'), max_len=20).lower()
     if media_kind not in {'image', 'video'}:
         return jsonify({'message': 'Invalid media type'}), 400
 
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'message': 'No file uploaded'}), 400
-
-    try:
-        uploaded = save_media_file(file, media_kind)
-    except ValueError as exc:
-        return jsonify({'message': str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({'message': str(exc)}), 500
+    file_path = _safe_text(data.get('file_path'), max_len=1000)
+    if not file_path:
+        return jsonify({'message': 'file_path is required'}), 400
 
     record = ClientRoomUpload(
         consultation_id=consultation_id,
         user_id=None,
-        file_url=uploaded.get('url'),
+        file_url=file_path,
         file_type=media_kind,
-        file_label=_safe_text(request.form.get('file_label'), max_len=120) or None,
-        provider=uploaded.get('provider'),
-        file_size_kb=_safe_int(request.form.get('file_size_kb'), default=0, min_value=0) or None,
-        is_floor_plan=_safe_bool(request.form.get('is_floor_plan'), default=False),
+        file_label=_safe_text(data.get('file_label'), max_len=120) or None,
+        provider='supabase-storage',
+        file_size_kb=_safe_int(data.get('file_size_kb'), default=0, min_value=0) or None,
+        is_floor_plan=_safe_bool(data.get('is_floor_plan'), default=False),
     )
     db.session.add(record)
     db.session.commit()
@@ -398,12 +445,26 @@ def admin_create_virtual_project():
         consultation_id=consultation_id or None,
         title=title,
         description=_safe_text(data.get('description'), max_len=4000) or None,
-        design_style=_safe_text(data.get('design_style'), max_len=120) or None,
+        design_style=_safe_text(data.get('design_style', data.get('category')), max_len=120) or None,
+        thumbnail=_safe_text(data.get('thumbnail'), max_len=2000),
+        gallery=_safe_json_list(data.get('gallery')),
+        video_url=_safe_text(data.get('video_url'), max_len=2000),
+        video_thumbnail=_safe_text(data.get('video_thumbnail'), max_len=2000),
+        before_image_url=_safe_text(data.get('before_image_url', data.get('beforeImage')), max_len=2000),
+        after_image_url=_safe_text(data.get('after_image_url', data.get('afterImage')), max_len=2000),
+        designer=_safe_text(data.get('designer'), max_len=120),
+        date=_safe_text(data.get('date'), max_len=20),
+        featured=_safe_bool(data.get('featured'), False),
+        tags=_safe_json_list(data.get('tags')),
+        ai_tags=_safe_json_list(data.get('ai_tags', data.get('aiTags'))),
+        views=_safe_int(data.get('views'), default=0, min_value=0),
+        favorites=_safe_int(data.get('favorites'), default=0, min_value=0),
         status=status,
         progress_percent=_safe_int(data.get('progress_percent'), default=0, min_value=0, max_value=100),
         milestones=data.get('milestones') if isinstance(data.get('milestones'), list) else [],
         assigned_designer_id=_safe_uuid(data.get('assigned_designer_id')),
         is_archived=_safe_bool(data.get('is_archived'), default=False),
+        is_published=_safe_bool(data.get('is_published', data.get('published')), default=status in {'published', 'completed'}),
     )
     db.session.add(project)
     db.session.commit()
@@ -430,27 +491,68 @@ def admin_update_virtual_project(project_id):
             return jsonify({'message': 'title is required'}), 400
         project.title = title
 
+    if 'description' in data:
+        project.description = _safe_text(data.get('description'), max_len=4000) or None
+    if 'design_style' in data or 'category' in data:
+        project.design_style = _safe_text(data.get('design_style', data.get('category')), max_len=120) or None
+    if 'thumbnail' in data:
+        project.thumbnail = _safe_text(data.get('thumbnail'), max_len=2000)
+    if 'gallery' in data:
+        project.gallery = _safe_json_list(data.get('gallery'))
+    if 'video_url' in data:
+        project.video_url = _safe_text(data.get('video_url'), max_len=2000)
+    if 'video_thumbnail' in data:
+        project.video_thumbnail = _safe_text(data.get('video_thumbnail'), max_len=2000)
+    if 'before_image_url' in data or 'beforeImage' in data:
+        project.before_image_url = _safe_text(data.get('before_image_url', data.get('beforeImage')), max_len=2000)
+    if 'after_image_url' in data or 'afterImage' in data:
+        project.after_image_url = _safe_text(data.get('after_image_url', data.get('afterImage')), max_len=2000)
+    if 'designer' in data:
+        project.designer = _safe_text(data.get('designer'), max_len=120) or None
+    if 'date' in data:
+        project.date = _safe_text(data.get('date'), max_len=20) or None
+    if 'featured' in data:
+        project.featured = _safe_bool(data.get('featured'), False)
+    if 'tags' in data:
+        project.tags = _safe_json_list(data.get('tags'))
+    if 'ai_tags' in data or 'aiTags' in data:
+        project.ai_tags = _safe_json_list(data.get('ai_tags', data.get('aiTags')))
+    if 'views' in data:
+        project.views = _safe_int(data.get('views'), default=project.views, min_value=0)
+    if 'favorites' in data:
+        project.favorites = _safe_int(data.get('favorites'), default=project.favorites, min_value=0)
+
     if 'status' in data:
         status = _safe_text(data.get('status'), max_len=40)
         if status not in PROJECT_STATUSES:
             return jsonify({'message': 'Invalid project status'}), 400
         project.status = status
 
-    if 'description' in data:
-        project.description = _safe_text(data.get('description'), max_len=4000) or None
-    if 'design_style' in data:
-        project.design_style = _safe_text(data.get('design_style'), max_len=120) or None
     if 'progress_percent' in data:
         project.progress_percent = _safe_int(data.get('progress_percent'), default=0, min_value=0, max_value=100)
-    if 'milestones' in data and isinstance(data.get('milestones'), list):
-        project.milestones = data.get('milestones')
-    if 'assigned_designer_id' in data:
-        project.assigned_designer_id = _safe_uuid(data.get('assigned_designer_id'))
+    if 'is_published' in data or 'published' in data:
+        project.is_published = _safe_bool(data.get('is_published', data.get('published')), default=project.is_published)
     if 'is_archived' in data:
-        project.is_archived = _safe_bool(data.get('is_archived'), default=False)
+        project.is_archived = _safe_bool(data.get('is_archived'), default=project.is_archived)
 
     db.session.commit()
     return jsonify(project.to_dict()), 200
+
+
+@virtual_interior_services_bp.delete('/admin/virtual-interior/projects/<int:project_id>')
+@jwt_required()
+def admin_delete_virtual_project(project_id):
+    err = _admin_required_response()
+    if err:
+        return err
+
+    project = db.session.get(VirtualProject, project_id)
+    if not project:
+        return jsonify({'message': 'Project not found'}), 404
+
+    db.session.delete(project)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'}), 200
 
 
 @virtual_interior_services_bp.post('/admin/virtual-interior/projects/<int:project_id>/progress')
@@ -751,26 +853,3 @@ def admin_delete_virtual_preview(preview_id):
     return jsonify({'message': 'Deleted'}), 200
 
 
-@virtual_interior_services_bp.post('/admin/virtual-interior/upload-media')
-@jwt_required()
-def admin_upload_virtual_media():
-    err = _admin_required_response()
-    if err:
-        return err
-
-    media_kind = _safe_text(request.form.get('type', 'image'), max_len=20).lower()
-    if media_kind not in {'image', 'video'}:
-        return jsonify({'message': 'Invalid media type'}), 400
-
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'message': 'No file uploaded'}), 400
-
-    try:
-        uploaded = save_media_file(file, media_kind)
-    except ValueError as exc:
-        return jsonify({'message': str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({'message': str(exc)}), 500
-
-    return jsonify(uploaded), 201

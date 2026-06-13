@@ -42,12 +42,39 @@ def _find_project_by_id(pid: str):
     )
 
 
+def _clean_text(value, max_len=None):
+    text = str(value or '').strip()
+    if not text:
+        return None
+    return text[:max_len] if max_len else text
+
+
+def _clean_json_list(value):
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = __import__('json').loads(text)
+            return parsed if isinstance(parsed, list) else None
+        except Exception:
+            return None
+    return None
+
+
 @portfolio_bp.get('/portfolio')
 def list_projects():
     try:
-        projects = PortfolioProject.query.filter(
-            PortfolioProject.is_published.isnot(False)
-        ).order_by(PortfolioProject.sort_order, PortfolioProject.created_at).all()
+        projects = (
+            PortfolioProject.query
+            .filter(PortfolioProject.is_published.isnot(False))
+            .order_by(PortfolioProject.created_at.desc(), PortfolioProject.sort_order.asc())
+            .all()
+        )
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
         db.session.rollback()
@@ -62,7 +89,8 @@ def list_all_projects():
         return jsonify({'message': 'Admin only'}), 403
     try:
         projects = PortfolioProject.query.order_by(
-            PortfolioProject.sort_order, PortfolioProject.created_at
+            PortfolioProject.created_at.desc(),
+            PortfolioProject.sort_order.asc(),
         ).all()
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
@@ -80,15 +108,19 @@ def create_project():
     if not (data.get('title') or '').strip():
         return jsonify({'message': 'Title is required'}), 400
     p = PortfolioProject(
-        title=data['title'].strip(),
-        summary=(data.get('summary') or '').strip() or None,
-        description=(data.get('description') or '').strip() or None,
-        image_url=(data.get('image_url') or '').strip() or None,
-        video_url=(data.get('video_url') or '').strip() or None,
-        room_type=(data.get('room_type') or '').strip() or None,
-        style=(data.get('style') or '').strip() or None,
-        year=(data.get('year') or '').strip() or None,
-        location=(data.get('location') or '').strip() or None,
+        title=(data.get('title') or '').strip(),
+        summary=_clean_text(data.get('summary'), 400),
+        description=_clean_text(data.get('description'), 5000),
+        image_url=_clean_text(data.get('image_url')),
+        video_url=_clean_text(data.get('video_url')),
+        room_type=_clean_text(data.get('room_type'), 80),
+        style=_clean_text(data.get('style'), 80),
+        category=_clean_text(data.get('category'), 80),
+        status=_clean_text(data.get('status'), 30) or 'completed',
+        completion_date=_clean_text(data.get('completion_date'), 30),
+        testimonials=_clean_json_list(data.get('testimonials')),
+        year=_clean_text(data.get('year'), 10),
+        location=_clean_text(data.get('location'), 120),
         sort_order=int(data.get('sort_order') or 0),
         is_published=bool(data.get('is_published', True)),
     )
@@ -106,9 +138,11 @@ def update_project(pid):
     if not p:
         return jsonify({'message': 'Project not found'}), 404
     data = request.get_json(silent=True) or {}
-    for field in ('title', 'summary', 'description', 'image_url', 'video_url', 'room_type', 'style', 'year', 'location'):
+    for field in ('title', 'summary', 'description', 'image_url', 'video_url', 'room_type', 'style', 'category', 'status', 'completion_date', 'year', 'location'):
         if field in data:
-            p.__setattr__(field, (data[field] or '').strip() or None)
+            setattr(p, field, _clean_text(data[field]) or (None if field != 'title' else p.title))
+    if 'testimonials' in data:
+        p.testimonials = _clean_json_list(data.get('testimonials'))
     if 'sort_order' in data:
         p.sort_order = int(data['sort_order'] or 0)
     if 'is_published' in data:

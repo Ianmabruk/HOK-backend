@@ -104,6 +104,25 @@ def email_users():
     }), 200
 
 
+@users_bp.patch('/users/<uuid:uid>/status')
+@jwt_required()
+def update_user_status(uid):
+    """Update user account status."""
+    err = _admin_only()
+    if err:
+        return err
+    user = db.session.get(User, uid)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ('active', 'suspended', 'disabled'):
+        return jsonify({'message': 'Invalid status. Must be active, suspended, or disabled'}), 400
+    user.status = status
+    db.session.commit()
+    return jsonify(user.to_dict())
+
+
 @users_bp.delete('/users/<uuid:uid>')
 @jwt_required()
 def delete_user(uid):
@@ -179,3 +198,79 @@ def sync_wishlist():
         db.session.add(WishlistItem(user_id=uid, product_id=pid))
     db.session.commit()
     return jsonify([str(pid) for pid in product_ids]), 200
+
+
+# ─── Email Templates ─────────────────────────────────────────────────────────────
+
+@users_bp.get('/users/email/templates')
+@jwt_required()
+def get_email_templates():
+    err = _admin_only()
+    if err:
+        return err
+    from models.models import EmailTemplate
+    templates = EmailTemplate.query.order_by(EmailTemplate.created_at.desc()).all()
+    return jsonify([t.to_dict() for t in templates])
+
+
+@users_bp.post('/users/email/templates')
+@jwt_required()
+def create_email_template():
+    err = _admin_only()
+    if err:
+        return err
+    from models.models import EmailTemplate
+    data = request.get_json(silent=True) or {}
+    template_key = (data.get('template_key') or '').strip()
+    name = (data.get('name') or '').strip()
+    subject = (data.get('subject') or '').strip()
+    body = (data.get('body') or '').strip()
+    if not template_key or not name or not subject or not body:
+        return jsonify({'message': 'template_key, name, subject, and body are required'}), 400
+    template = EmailTemplate(
+        template_key=template_key,
+        name=name,
+        subject=subject,
+        body=body,
+    )
+    db.session.add(template)
+    db.session.commit()
+    return jsonify(template.to_dict()), 201
+
+
+@users_bp.put('/users/email/templates/<template_key>')
+@jwt_required()
+def update_email_template(template_key):
+    err = _admin_only()
+    if err:
+        return err
+    from models.models import EmailTemplate
+    template = EmailTemplate.query.filter_by(template_key=template_key).first()
+    if not template:
+        return jsonify({'message': 'Template not found'}), 404
+    data = request.get_json(silent=True) or {}
+    if 'name' in data:
+        template.name = (data.get('name') or '').strip() or template.name
+    if 'subject' in data:
+        template.subject = (data.get('subject') or '').strip() or template.subject
+    if 'body' in data:
+        template.body = (data.get('body') or '').strip() or template.body
+    if 'is_active' in data:
+        template.is_active = bool(data.get('is_active'))
+    db.session.commit()
+    return jsonify(template.to_dict())
+
+
+@users_bp.delete('/users/email/templates/<template_key>')
+@jwt_required()
+def delete_email_template(template_key):
+    err = _admin_only()
+    if err:
+        return err
+    from models.models import EmailTemplate
+    template = EmailTemplate.query.filter_by(template_key=template_key).first()
+    if not template:
+        return jsonify({'message': 'Template not found'}), 404
+    db.session.delete(template)
+    db.session.commit()
+    return jsonify({'message': 'Deleted'}), 200
