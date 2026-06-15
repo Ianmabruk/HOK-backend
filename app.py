@@ -21,6 +21,7 @@ from routes.portfolio import portfolio_bp
 from routes.media import media_bp
 from routes.admin_tools import admin_tools_bp
 from routes.virtual_interior_services import virtual_interior_services_bp
+from routes.projects import projects_bp
 from services.email_service import sendgrid_health_payload
 from sockets.chat import register_socket_events
 
@@ -404,6 +405,7 @@ def create_app():
     app.register_blueprint(before_after_bp, url_prefix='/api')
     app.register_blueprint(site_settings_bp, url_prefix='/api')
     app.register_blueprint(portfolio_bp, url_prefix='/api')
+    app.register_blueprint(projects_bp, url_prefix='/api')
     app.register_blueprint(media_bp, url_prefix='/api')
     app.register_blueprint(admin_tools_bp, url_prefix='/api')
     app.register_blueprint(virtual_interior_services_bp, url_prefix='/api')
