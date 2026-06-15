@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
 from auth_utils import current_user_role
-from models.models import SiteSetting, db
+from models.models import SiteSetting, BeforeAfterProject, PortfolioProject, db
 
 site_settings_bp = Blueprint('site_settings', __name__)
 
@@ -271,6 +271,54 @@ def _validate_category_showcase_payload(data):
     return None
 
 
+DEFAULT_ABOUT = {
+    'companyName': 'HOK Interior',
+    'description': 'HOK Interior blends craftsmanship with thoughtful curation to create spaces that feel both timeless and personal. Our team focuses on functional planning, material longevity, and refined aesthetics.',
+    'phone': '',
+    'email': 'info@hokinterior.com',
+    'officeLocation': '',
+    'socialLinks': [],
+    'imageUrl': '',
+}
+
+
+def _merge_about(value):
+    merged = deepcopy(DEFAULT_ABOUT)
+    if not isinstance(value, dict):
+        return merged
+
+    if isinstance(value.get('companyName'), str) and value['companyName'].strip():
+        merged['companyName'] = value['companyName'].strip()
+    if isinstance(value.get('description'), str) and value['description'].strip():
+        merged['description'] = value['description'].strip()
+    if isinstance(value.get('phone'), str):
+        merged['phone'] = value['phone'].strip()
+    if isinstance(value.get('email'), str):
+        merged['email'] = value['email'].strip()
+    if isinstance(value.get('officeLocation'), str):
+        merged['officeLocation'] = value['officeLocation'].strip()
+    if isinstance(value.get('imageUrl'), str):
+        merged['imageUrl'] = value['imageUrl'].strip()
+    if isinstance(value.get('socialLinks'), list):
+        merged['socialLinks'] = [
+            link for link in value['socialLinks']
+            if isinstance(link, dict) and isinstance(link.get('href'), str)
+        ]
+    return merged
+
+
+def _get_about():
+    setting = SiteSetting.query.filter_by(key='about').first()
+    if not setting:
+        return deepcopy(DEFAULT_ABOUT)
+    return _merge_about(setting.value)
+
+
+@site_settings_bp.get('/site-settings/about')
+def get_about():
+    return jsonify(_get_about()), 200
+
+
 @site_settings_bp.get('/site-settings/landing-images')
 def get_landing_images():
     return jsonify(_get_landing_images()), 200
@@ -295,6 +343,84 @@ def update_landing_images():
 
     db.session.commit()
     return jsonify(merged), 200
+
+
+@site_settings_bp.put('/site-settings/about')
+@jwt_required()
+def update_about():
+    err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    merged = _merge_about(data)
+
+    setting = SiteSetting.query.filter_by(key='about').first()
+    if not setting:
+        setting = SiteSetting(key='about', value=merged)
+        db.session.add(setting)
+    else:
+        setting.value = merged
+
+    db.session.commit()
+    return jsonify(merged), 200
+
+
+@site_settings_bp.get('/projects')
+def get_all_projects():
+    """Public endpoint returning all published before-after projects and portfolio items combined."""
+    items = []
+
+    # Get before-after projects
+    before_after = BeforeAfterProject.query.filter(
+        BeforeAfterProject.is_published.isnot(False)
+    ).order_by(BeforeAfterProject.created_at.desc()).all()
+
+    for p in before_after:
+        items.append({
+            'id': f"before-after-{p.id}",
+            'source': 'before-after',
+            'title': p.title,
+            'description': p.description,
+            'summary': p.description,
+            'image_url': p.after_poster_url or p.before_poster_url,
+            'video_url': p.after_video_url,
+            'category': p.category,
+            'room_type': p.room_type,
+            'location': p.room_type,
+            'status': p.status,
+            'is_published': p.is_published,
+            'created_at': p.created_at.isoformat() if p.created_at else None,
+            'updated_at': p.created_at.isoformat() if p.created_at else None,
+        })
+
+    # Get portfolio projects
+    portfolio = PortfolioProject.query.filter(
+        PortfolioProject.is_published.isnot(False)
+    ).order_by(PortfolioProject.created_at.desc()).all()
+
+    for p in portfolio:
+        items.append({
+            'id': f"portfolio-{p.id}",
+            'source': 'portfolio',
+            'title': p.title,
+            'description': p.description,
+            'summary': p.summary,
+            'image_url': p.image_url,
+            'video_url': p.video_url,
+            'category': p.category,
+            'room_type': p.room_type,
+            'location': p.location,
+            'year': p.year,
+            'status': p.status,
+            'is_published': p.is_published,
+            'created_at': p.created_at.isoformat() if p.created_at else None,
+            'updated_at': p.created_at.isoformat() if p.created_at else None,
+        })
+
+    # Sort by created_at descending (newest first)
+    items.sort(key=lambda item: item.get('created_at') or '', reverse=True)
+    return jsonify(items), 200
 
 
 @site_settings_bp.get('/site-settings/category-showcase')
