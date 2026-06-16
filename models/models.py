@@ -290,9 +290,8 @@ class Chat(db.Model):
 class PortfolioProject(db.Model):
     __tablename__ = 'portfolio_projects'
     __table_args__ = (
-        db.Index('ix_portfolio_projects_created_at', 'created_at'),
+        db.Index('ix_portfolio_projects_public_order', 'is_published', 'sort_order', 'created_at'),
         db.Index('ix_portfolio_projects_room_type', 'room_type'),
-        db.Index('ix_portfolio_projects_published', 'is_published'),
     )
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
@@ -310,6 +309,10 @@ class PortfolioProject(db.Model):
     location = db.Column(db.String(120))
     sort_order = db.Column(db.Integer, default=0)
     is_published = db.Column(db.Boolean, default=True, nullable=False)
+    is_featured = db.Column(db.Boolean, default=False, nullable=False)
+    display_order = db.Column(db.Integer, default=0)
+    media_type = db.Column(db.String(20), default='image')
+    motion_effect = db.Column(db.String(40), default='none')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -330,7 +333,12 @@ class PortfolioProject(db.Model):
             'location': self.location,
             'sort_order': self.sort_order,
             'is_published': self.is_published,
+            'is_featured': self.is_featured,
+            'display_order': self.display_order,
+            'media_type': self.media_type,
+            'motion_effect': self.motion_effect,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 

@@ -71,15 +71,19 @@ def list_projects():
     try:
         projects = (
             PortfolioProject.query
-            .filter(PortfolioProject.is_published.isnot(False))
-            .order_by(PortfolioProject.created_at.desc(), PortfolioProject.sort_order.asc())
+            .filter(PortfolioProject.is_published == True)
+            .order_by(
+                PortfolioProject.sort_order.asc(),
+                PortfolioProject.created_at.desc(),
+            )
+            .limit(20)
             .all()
         )
         return jsonify([p.to_dict() for p in projects]), 200
     except Exception:
         db.session.rollback()
         logger.exception('Failed to load published portfolio projects; returning empty list | %s', _request_error_context())
-        return jsonify([]), 200
+        return jsonify({'error': 'Failed to load portfolio', 'projects': []}), 500
 
 
 @portfolio_bp.get('/portfolio/all')
@@ -123,6 +127,10 @@ def create_project():
         location=_clean_text(data.get('location'), 120),
         sort_order=int(data.get('sort_order') or 0),
         is_published=bool(data.get('is_published', True)),
+        is_featured=bool(data.get('is_featured', False)),
+        display_order=int(data.get('display_order') or 0),
+        media_type=_clean_text(data.get('media_type'), 20) or 'image',
+        motion_effect=_clean_text(data.get('motion_effect'), 40) or 'none',
     )
     db.session.add(p)
     db.session.commit()
