@@ -193,11 +193,19 @@ def get_products():
     limit = min(max(_safe_int(request.args.get('limit'), 12), 1), 200)
     price_min = request.args.get('price_min', 0, type=float)
     price_max = request.args.get('price_max', 1e9, type=float)
+    featured = request.args.get('featured')
+    trending = request.args.get('trending')
 
     q = Product.query.filter(
         Product.price >= price_min,
         Product.price <= price_max
     )
+    if featured is not None:
+        featured_val = _clean_bool(featured, False)
+        q = q.filter(Product.featured == featured_val)
+    if trending is not None:
+        trending_val = _clean_bool(trending, False)
+        q = q.filter(Product.trending == trending_val)
     if category:
         normalized_category = func.lower(
             func.replace(

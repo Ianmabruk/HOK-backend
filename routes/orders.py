@@ -4,7 +4,7 @@ import json
 
 from flask import Blueprint, request, jsonify
 from sqlalchemy import text, inspect
-from models.models import db, Order, OrderItem, Product, User
+from models.models import db, Order, OrderItem, Product, ProductVariant, User
 from flask_jwt_extended import jwt_required
 
 from auth_utils import current_user_id, current_user_role
@@ -160,6 +160,22 @@ def create_order():
             if not is_quote_request:
                 product.stock -= quantity
 
+            variant = None
+            if item.get('variant_id'):
+                try:
+                    variant = db.session.get(ProductVariant, item['variant_id'])
+                except Exception:
+                    variant = None
+
+            unit_price = product.price
+            if variant is not None and getattr(variant, 'price_override', None) is not None:
+                try:
+                    unit_price = float(variant.price_override)
+                except (TypeError, ValueError):
+                    unit_price = product.price
+
+            unit_cost = product.cost_price if product.cost_price is not None else 0
+
             customizations_value = item.get('customizations') if isinstance(item, dict) else None
             if customizations_col_type and 'json' not in customizations_col_type and customizations_value is not None:
                 customizations_value = json.dumps(customizations_value)
@@ -168,8 +184,8 @@ def create_order():
                 order_id=order.id,
                 product_id=product_id,
                 quantity=quantity,
-                unit_price=product.price,
-                unit_cost=product.cost_price if product.cost_price is not None else 0,
+                unit_price=unit_price,
+                unit_cost=unit_cost,
                 product_title=product.title,
                 product_image=_extract_primary_image_url(product.image_url),
                 customizations=customizations_value,
@@ -249,6 +265,19 @@ def create_order():
                 if not is_quote_request and product.stock is not None:
                     product.stock = max(int(product.stock) - quantity, 0)
 
+                fallback_unit_price = float(product.price or 0)
+                fallback_variant = None
+                if item.get('variant_id'):
+                    try:
+                        fallback_variant = db.session.get(ProductVariant, item['variant_id'])
+                    except Exception:
+                        fallback_variant = None
+                if fallback_variant is not None and getattr(fallback_variant, 'price_override', None) is not None:
+                    try:
+                        fallback_unit_price = float(fallback_variant.price_override)
+                    except (TypeError, ValueError):
+                        pass
+
                 # Handle customizations in fallback mode
                 customizations_value = item.get('customizations') if isinstance(item, dict) else None
                 if customizations_col_type and 'json' not in customizations_col_type and customizations_value is not None:
@@ -273,7 +302,7 @@ def create_order():
                 if 'unit_price' in item_cols:
                     insert_item_cols.append('unit_price')
                     insert_item_vals.append(':unit_price')
-                    insert_item_params['unit_price'] = float(product.price or 0)
+                    insert_item_params['unit_price'] = fallback_unit_price
                 if 'unit_cost' in item_cols:
                     insert_item_cols.append('unit_cost')
                     insert_item_vals.append(':unit_cost')
