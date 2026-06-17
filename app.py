@@ -270,6 +270,10 @@ def _ensure_portfolio_columns(app):
         'location': 'VARCHAR(120)',
         'sort_order': 'INTEGER NOT NULL DEFAULT 0',
         'is_published': 'BOOLEAN NOT NULL DEFAULT TRUE',
+        'is_featured': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'display_order': 'INTEGER NOT NULL DEFAULT 0',
+        'media_type': "VARCHAR(20) NOT NULL DEFAULT 'image'",
+        'motion_effect': "VARCHAR(40) NOT NULL DEFAULT 'none'",
     }
     for name, definition in portfolio_columns.items():
         if name not in existing:
@@ -285,6 +289,8 @@ def _ensure_portfolio_columns(app):
             'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_created_at ON portfolio_projects (created_at)',
             'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_room_type ON portfolio_projects (room_type)',
             'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_published ON portfolio_projects (is_published)',
+            'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_featured ON portfolio_projects (is_featured)',
+            'CREATE INDEX IF NOT EXISTS ix_portfolio_projects_display_order ON portfolio_projects (display_order)',
         ):
             try:
                 conn.execute(text(statement))
@@ -314,6 +320,12 @@ def _ensure_virtual_project_columns(app):
         'views': 'INTEGER NOT NULL DEFAULT 0',
         'favorites': 'INTEGER NOT NULL DEFAULT 0',
         'is_published': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'progress_percent': 'INTEGER NOT NULL DEFAULT 0',
+        'milestones': 'JSON',
+        'assigned_designer_id': 'UUID',
+        'status': "VARCHAR(40) NOT NULL DEFAULT 'planning'",
+        'is_archived': 'BOOLEAN NOT NULL DEFAULT FALSE',
+        'updated_at': 'TIMESTAMP',
     }
     for name, definition in virtual_project_columns.items():
         if name not in existing:
@@ -329,6 +341,7 @@ def _ensure_virtual_project_columns(app):
             'CREATE INDEX IF NOT EXISTS ix_virtual_projects_published ON virtual_projects (is_published)',
             'CREATE INDEX IF NOT EXISTS ix_virtual_projects_created_at ON virtual_projects (created_at)',
             'CREATE INDEX IF NOT EXISTS ix_virtual_projects_archived ON virtual_projects (is_archived)',
+            'CREATE INDEX IF NOT EXISTS ix_virtual_projects_updated_at ON virtual_projects (updated_at)',
         ):
             try:
                 conn.execute(text(statement))

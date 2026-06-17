@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+import os
 import uuid
 from models.models import db, Product, ProductVariant
 from flask_jwt_extended import jwt_required
@@ -184,6 +185,20 @@ def upload_product_media():
         return jsonify({'message': exc.user_message, 'error': str(exc)}), exc.status_code
 
 
+@products_bp.get('/products/detect-currency')
+def detect_currency():
+    try:
+        usd_to_kes = float(os.getenv('USD_TO_KES', '130'))
+    except ValueError:
+        usd_to_kes = 130.0
+    return jsonify({
+        'currency': 'USD',
+        'exchange': {
+            'usd_to_kes': usd_to_kes,
+        },
+    })
+
+
 @products_bp.get('/products')
 def get_products():
     category = _normalize_category(request.args.get('category'))
@@ -230,6 +245,8 @@ def get_products():
         q = q.order_by(Product.price.desc())
     elif sort == 'newest':
         q = q.order_by(Product.created_at.desc())
+    elif sort == 'name_asc':
+        q = q.order_by(Product.title.asc())
     else:
         q = q.order_by(Product.id.desc())
 

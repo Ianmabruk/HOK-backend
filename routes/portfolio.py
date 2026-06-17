@@ -129,7 +129,7 @@ def create_project():
         is_published=bool(data.get('is_published', True)),
         is_featured=bool(data.get('is_featured', False)),
         display_order=int(data.get('display_order') or 0),
-        media_type=_clean_text(data.get('media_type'), 20) or 'image',
+        media_type=_clean_text(data.get('media_type'), 20) or ('video' if data.get('video_url') else 'image'),
         motion_effect=_clean_text(data.get('motion_effect'), 40) or 'none',
     )
     db.session.add(p)
@@ -154,7 +154,15 @@ def update_project(pid):
     if 'sort_order' in data:
         p.sort_order = int(data['sort_order'] or 0)
     if 'is_published' in data:
-        p.is_published = bool(data['is_published'])
+        p.is_published = bool(data.get('is_published'))
+    if 'is_featured' in data:
+        p.is_featured = bool(data.get('is_featured'))
+    if 'display_order' in data:
+        p.display_order = int(data.get('display_order') or 0)
+    if 'media_type' in data:
+        p.media_type = _clean_text(data.get('media_type'), 20) or ('video' if p.video_url else 'image')
+    if 'motion_effect' in data:
+        p.motion_effect = _clean_text(data.get('motion_effect'), 40) or 'none'
     db.session.commit()
     return jsonify(p.to_dict()), 200
 
