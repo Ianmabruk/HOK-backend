@@ -1,3 +1,5 @@
+from hashlib import sha1
+
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
@@ -5,6 +7,13 @@ import uuid
 from sqlalchemy.dialects.postgresql import UUID
 
 db = SQLAlchemy()
+
+
+def _media_token(value):
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    return sha1(value.encode('utf-8', errors='ignore')).hexdigest()[:8]
 
 
 class User(db.Model):
@@ -322,7 +331,9 @@ class PortfolioProject(db.Model):
             'summary': self.summary,
             'description': self.description,
             'image_url': self.image_url,
+            'image_url_token': _media_token(self.image_url),
             'video_url': self.video_url,
+            'video_url_token': _media_token(self.video_url),
             'room_type': self.room_type,
             'style': self.style,
             'category': self.category,
