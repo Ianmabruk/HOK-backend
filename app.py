@@ -46,6 +46,16 @@ def _allowed_origins(app):
     return [origin for origin in origins if origin]
 
 
+def _cors_middleware(app):
+    """Configure CORS with explicit headers for preflight support."""
+    allowed = _allowed_origins(app)
+    cors = CORS(
+        app,
+        resources={r'/api/*': {'origins': allowed, 'methods': ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], 'allow_headers': ['Content-Type', 'Authorization'], 'supports_credentials': True}},
+    )
+    return cors
+
+
 def _ensure_order_item_columns(app):
     inspector = inspect(db.engine)
     existing_columns = {column['name'] for column in inspector.get_columns('order_items')}
@@ -405,13 +415,11 @@ def create_app():
     app.config.from_object(Config)
     app.config['MAX_CONTENT_LENGTH'] = app.config.get('MAX_CONTENT_LENGTH') or 120 * 1024 * 1024
 
-    allowed_origins = _allowed_origins(app)
-
-    CORS(app, resources={r'/api/*': {'origins': allowed_origins}}, supports_credentials=True)
+    _cors_middleware(app)
 
     db.init_app(app)
     JWTManager(app)
-    socketio.init_app(app, cors_allowed_origins=allowed_origins, async_mode='threading')
+    socketio.init_app(app, cors_allowed_origins=_allowed_origins(app), async_mode='threading')
 
     app.register_blueprint(auth_bp, url_prefix='/api')
     app.register_blueprint(products_bp, url_prefix='/api')
