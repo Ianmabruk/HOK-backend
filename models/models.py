@@ -320,6 +320,7 @@ class PortfolioProject(db.Model):
     is_published = db.Column(db.Boolean, default=True, nullable=False)
     is_featured = db.Column(db.Boolean, default=False, nullable=False)
     display_order = db.Column(db.Integer, default=0)
+    media_public_id = db.Column(db.Text)
     media_type = db.Column(db.String(20), default='image')
     motion_effect = db.Column(db.String(40), default='none')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -331,6 +332,7 @@ class PortfolioProject(db.Model):
             'summary': self.summary,
             'description': self.description,
             'image_url': self.image_url,
+            'media_public_id': getattr(self, 'media_public_id', None),
             'image_url_token': _media_token(self.image_url),
             'video_url': self.video_url,
             'video_url_token': _media_token(self.video_url),

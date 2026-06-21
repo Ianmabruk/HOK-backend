@@ -272,6 +272,7 @@ def _ensure_portfolio_columns(app):
         'is_published': 'BOOLEAN NOT NULL DEFAULT TRUE',
         'is_featured': 'BOOLEAN NOT NULL DEFAULT FALSE',
         'display_order': 'INTEGER NOT NULL DEFAULT 0',
+        'media_public_id': 'TEXT',
         'media_type': "VARCHAR(20) NOT NULL DEFAULT 'image'",
         'motion_effect': "VARCHAR(40) NOT NULL DEFAULT 'none'",
     }

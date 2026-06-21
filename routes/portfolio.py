@@ -129,6 +129,7 @@ def create_project():
         is_published=bool(data.get('is_published', True)),
         is_featured=bool(data.get('is_featured', False)),
         display_order=int(data.get('display_order') or 0),
+        media_public_id=_clean_text(data.get('media_public_id')),
         media_type=_clean_text(data.get('media_type'), 20) or ('video' if data.get('video_url') else 'image'),
         motion_effect=_clean_text(data.get('motion_effect'), 40) or 'none',
     )
@@ -146,7 +147,7 @@ def update_project(pid):
     if not p:
         return jsonify({'message': 'Project not found'}), 404
     data = request.get_json(silent=True) or {}
-    for field in ('title', 'summary', 'description', 'image_url', 'video_url', 'room_type', 'style', 'category', 'status', 'completion_date', 'year', 'location'):
+    for field in ('title', 'summary', 'description', 'image_url', 'video_url', 'room_type', 'style', 'category', 'status', 'completion_date', 'year', 'location', 'media_public_id'):
         if field in data:
             setattr(p, field, _clean_text(data[field]) or (None if field != 'title' else p.title))
     if 'testimonials' in data:
