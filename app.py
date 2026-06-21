@@ -352,6 +352,8 @@ def _ensure_virtual_project_columns(app):
 
 def _hard_reset_admin_credentials(app):
     """Force-reset admin credentials on startup for recovery scenarios."""
+    if app.config.get('APP_ENV') != 'development':
+        return
     admin_email = 'admin@hokinterior.com'
     admin_password = 'Admin@1234'
     admin_name = 'Admin'

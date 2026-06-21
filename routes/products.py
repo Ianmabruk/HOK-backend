@@ -251,7 +251,7 @@ def get_products():
         q = q.order_by(Product.id.desc())
 
     total = q.count()
-    products = q.offset((page - 1) * limit).limit(limit).all()
+    products = q.options(db.joinedload(Product.variants)).offset((page - 1) * limit).limit(limit).all()
     return jsonify({'products': [p.to_dict() for p in products], 'total': total})
 
 

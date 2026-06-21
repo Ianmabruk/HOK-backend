@@ -420,6 +420,36 @@ def get_orders():
 
         item_cols = _table_columns('order_items')
 
+        # Fetch all order items for the returned orders in a single query
+        order_ids = [row['id'] for row in orders_rows]
+        item_rows_by_order = {}
+        if order_ids:
+            item_select_expr = [
+                'order_id',
+                'id' if 'id' in item_cols else 'NULL AS id',
+                'product_id' if 'product_id' in item_cols else 'NULL AS product_id',
+                'quantity' if 'quantity' in item_cols else 'NULL AS quantity',
+                'unit_price' if 'unit_price' in item_cols else 'NULL AS unit_price',
+                'unit_cost' if 'unit_cost' in item_cols else 'NULL AS unit_cost',
+                'product_title' if 'product_title' in item_cols else 'NULL AS product_title',
+                'product_image' if 'product_image' in item_cols else 'NULL AS product_image',
+                'customizations' if 'customizations' in item_cols else 'NULL AS customizations',
+            ]
+            all_item_rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT {', '.join(item_select_expr)}
+                    FROM order_items
+                    WHERE order_id IN :oids
+                    ORDER BY id ASC
+                    """
+                ),
+                {'oids': tuple(order_ids)},
+            ).mappings().all()
+            for item in all_item_rows:
+                oid = item['order_id']
+                item_rows_by_order.setdefault(oid, []).append(item)
+
         payload = []
         for row in orders_rows:
             item_select_expr = [
@@ -469,7 +499,7 @@ def get_orders():
                         'customizations': item.get('customizations'),
                         'product': None,
                     }
-                    for item in item_rows
+                    for item in item_rows_by_order.get(row['id'], [])
                 ],
             })
 
