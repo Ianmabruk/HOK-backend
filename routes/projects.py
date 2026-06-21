@@ -26,6 +26,7 @@ def list_projects():
     ).order_by(BeforeAfterProject.created_at.desc()).all()
 
     for p in before_after:
+        updated_at = getattr(p, 'updated_at', None)
         items.append({
             'id': f"before-after-{p.id}",
             'source': 'before-after',
@@ -42,7 +43,7 @@ def list_projects():
             'status': p.status,
             'is_published': p.is_published,
             'created_at': p.created_at.isoformat() if p.created_at else None,
-            'updated_at': p.updated_at.isoformat() if p.updated_at else None,
+            'updated_at': updated_at.isoformat() if updated_at else None,
         })
 
     portfolio = PortfolioProject.query.filter(
@@ -50,6 +51,7 @@ def list_projects():
     ).order_by(PortfolioProject.created_at.desc()).all()
 
     for p in portfolio:
+        updated_at = getattr(p, 'updated_at', None)
         items.append({
             'id': f"portfolio-{p.id}",
             'source': 'portfolio',
@@ -66,7 +68,7 @@ def list_projects():
             'status': p.status,
             'is_published': p.is_published,
             'created_at': p.created_at.isoformat() if p.created_at else None,
-            'updated_at': p.updated_at.isoformat() if p.updated_at else None,
+            'updated_at': updated_at.isoformat() if updated_at else None,
         })
 
     items.sort(key=lambda x: x.get('created_at') or '', reverse=True)
