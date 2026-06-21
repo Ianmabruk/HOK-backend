@@ -252,7 +252,38 @@ def get_products():
 
     total = q.count()
     products = q.options(db.joinedload(Product.variants)).offset((page - 1) * limit).limit(limit).all()
-    return jsonify({'products': [p.to_dict() for p in products], 'total': total})
+    payload = []
+    for p in products:
+      item = {
+        'id': str(p.id),
+        'title': p.title,
+        'description': p.description,
+        'price': float(p.price),
+        'cost_price': float(p.cost_price) if p.cost_price is not None else None,
+        'display_price': float(p.display_price) if p.display_price is not None else None,
+        'price_usd': float(p.price_usd) if p.price_usd is not None else None,
+        'base_currency': p.base_currency or 'USD',
+        'sku': p.sku,
+        'status': p.status,
+        'video_url': p.video_url,
+        'image_url': p.image_url,
+        'stock': p.stock,
+        'category': p.category,
+        'subcategory': p.subcategory,
+        'vendor_id': p.vendor_id,
+        'featured': p.featured,
+        'trending': p.trending,
+        'tags': p.tags or [],
+        'material_type': p.material_type,
+        'color_theme': p.color_theme,
+        'dimensions': p.dimensions,
+        'created_at': p.created_at.isoformat() if p.created_at else None,
+      }
+      variants = getattr(p, 'variants', None)
+      if variants:
+        item['variants'] = [v.to_dict() for v in variants]
+      payload.append(item)
+    return jsonify({'products': payload, 'total': total})
 
 
 @products_bp.get('/products/<uuid:pid>')
