@@ -325,6 +325,7 @@ def _ensure_virtual_project_columns(app):
         'after_image_url': 'TEXT',
         'designer': 'VARCHAR(120)',
         'date': 'VARCHAR(20)',
+        'slug': "VARCHAR(160)",
         'featured': 'BOOLEAN NOT NULL DEFAULT FALSE',
         'tags': 'JSON',
         'ai_tags': 'JSON',

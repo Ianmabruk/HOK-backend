@@ -1,12 +1,13 @@
 """
-Projects route - combines portfolio and before-after projects.
-GET /api/projects - list published projects from both sources
+Projects route - combines portfolio and before-after projects and virtual projects.
+GET /api/projects - list published projects from all sources
 """
 import logging
 from hashlib import sha1
+import uuid
 
 from flask import Blueprint, jsonify
-from models.models import BeforeAfterProject, PortfolioProject, db
+from models.models import BeforeAfterProject, PortfolioProject, VirtualProject, db
 
 projects_bp = Blueprint('projects', __name__)
 logger = logging.getLogger(__name__)
@@ -102,6 +103,41 @@ def list_projects():
                 'is_published': p.is_published,
                 'created_at': _safe_iso(p.created_at),
                 'updated_at': _safe_iso(_get_updated_at(p)),
+            })
+
+        try:
+            virtual_projects = (
+                VirtualProject.query
+                .filter(
+                    VirtualProject.is_published.isnot(False),
+                    VirtualProject.is_archived.isnot(True),
+                )
+                .order_by(VirtualProject.created_at.desc())
+                .all()
+            )
+        except Exception as exc:
+            logger.warning('Failed to load virtual_projects: %s', exc)
+            virtual_projects = []
+
+        for p in virtual_projects:
+            items.append({
+                'id': f"virtual-{p.id}",
+                'source': 'virtual',
+                'title': p.title,
+                'description': p.description,
+                'summary': p.description,
+                'image_url': p.thumbnail,
+                'image_url_token': _media_token(p.thumbnail),
+                'video_url': p.video_url,
+                'video_url_token': _media_token(p.video_url),
+                'category': p.design_style or 'Virtual interior',
+                'room_type': p.design_style,
+                'location': p.date,
+                'status': p.status,
+                'is_published': p.is_published,
+                'created_at': _safe_iso(p.created_at),
+                'updated_at': _safe_iso(p.updated_at),
+                'is_featured': p.featured,
             })
 
         items.sort(key=lambda x: x.get('created_at') or '', reverse=True)

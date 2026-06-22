@@ -83,6 +83,16 @@ def _safe_uuid(value):
         return None
 
 
+def _generate_slug(title):
+    """Generate a URL-safe slug from a title."""
+    if not title:
+        return f"project-{uuid.uuid4().hex[:8]}"
+    slug = str(title).strip().lower()
+    slug = ''.join(c if c.isalnum() or c in '-_' else '-' for c in slug)
+    slug = '-'.join(part for part in slug.split('-') if part).strip('-')
+    return slug[:160] if slug else f"project-{uuid.uuid4().hex[:8]}"
+
+
 def _pagination(default_limit=12, max_limit=100):
     page = _safe_int(request.args.get('page', 1), default=1, min_value=1)
     limit = _safe_int(request.args.get('limit', default_limit), default=default_limit, min_value=1, max_value=max_limit)
@@ -443,6 +453,7 @@ def admin_create_virtual_project():
 
     project = VirtualProject(
         consultation_id=consultation_id or None,
+        slug=_generate_slug(title),
         title=title,
         description=_safe_text(data.get('description'), max_len=4000) or None,
         design_style=_safe_text(data.get('design_style', data.get('category')), max_len=120) or None,
@@ -490,6 +501,9 @@ def admin_update_virtual_project(project_id):
         if not title:
             return jsonify({'message': 'title is required'}), 400
         project.title = title
+        # Update slug when title changes
+        if 'slug' not in data or not project.slug:
+            project.slug = _generate_slug(title)
 
     if 'description' in data:
         project.description = _safe_text(data.get('description'), max_len=4000) or None

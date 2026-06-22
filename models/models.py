@@ -549,6 +549,7 @@ class VirtualProject(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     consultation_id = db.Column(db.Integer, db.ForeignKey('virtual_consultations.id', ondelete='SET NULL'), nullable=True)
+    slug = db.Column(db.String(160), nullable=True, unique=True, index=True)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     design_style = db.Column(db.String(120), nullable=True)
@@ -581,6 +582,7 @@ class VirtualProject(db.Model):
         return {
             'id': self.id,
             'consultation_id': self.consultation_id,
+            'slug': self.slug or f"project-{self.id}",
             'title': self.title,
             'description': self.description,
             'design_style': self.design_style,
