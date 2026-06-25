@@ -4,6 +4,7 @@ flask-jwt-extended
 flask-cors
 flask-socketio
 flask-mail
+flask-compress
 bcrypt
 python-dotenv
 gunicorn

@@ -8,6 +8,7 @@ from flask_socketio import SocketIO
 from sqlalchemy import inspect, text, func
 from werkzeug.exceptions import HTTPException
 
+from flask_compress import Compress
 from config.config import Config
 from models.models import db
 from routes.auth import auth_bp
@@ -18,14 +19,15 @@ from routes.vendors import vendors_bp
 from routes.before_after import before_after_bp
 from routes.site_settings import site_settings_bp
 from routes.portfolio import portfolio_bp
+from routes.projects import projects_bp
 from routes.media import media_bp
 from routes.admin_tools import admin_tools_bp
 from routes.virtual_interior_services import virtual_interior_services_bp
-from routes.projects import projects_bp
 from services.email_service import sendgrid_health_payload
 from sockets.chat import register_socket_events
 
 socketio = SocketIO()
+compress = Compress()
 
 
 def _allowed_origins(app):
@@ -418,6 +420,7 @@ def create_app():
 
     _cors_middleware(app)
 
+    compress.init_app(app)
     db.init_app(app)
     JWTManager(app)
     socketio.init_app(app, cors_allowed_origins=_allowed_origins(app), async_mode='threading')
@@ -480,6 +483,38 @@ def create_app():
             },
         }
         return jsonify(payload), (200 if payload['status'] == 'ok' else 503)
+
+
+    _PUBLIC_CACHEABLE_PATHS = {
+        '/api/portfolio',
+        '/api/projects',
+        '/api/projects/stats',
+        '/api/site-settings/about',
+        '/api/site-settings/landing-images',
+        '/api/site-settings/category-showcase',
+        '/api/virtual-interior/projects',
+        '/api/virtual-interior/overview',
+        '/api/virtual-interior/inspiration',
+        '/api/virtual-interior/previews',
+        '/api/products',
+        '/api/products/categories',
+        '/api/products/exchange-rate',
+        '/api/before-after',
+    }
+
+    @app.after_request
+    def _apply_cache_headers(response):
+        try:
+            path = request.path
+            if request.method != 'GET':
+                return response
+            if not any(path == p or path.startswith(p + '/') or path.startswith(p + '?') for p in _PUBLIC_CACHEABLE_PATHS):
+                return response
+            response.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=60'
+            response.headers['Vary'] = 'Accept-Encoding, Origin'
+        except Exception:
+            pass
+        return response
 
     # ── JSON error handlers (must be inside create_app so they bind to this app) ──
     @app.errorhandler(HTTPException)
